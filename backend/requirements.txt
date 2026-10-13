@@ -12,4 +12,6 @@ python-dotenv==1.2.3
 
 # Tests only
 pytest==9.1.1
-httpx==0.28.1
+httpx2==2.13.1
+# Needed by httpx2. Pinned to 0.10.4 because 0.10.5 was only two days old when httpx2 was added.
+truststore==0.10.4
