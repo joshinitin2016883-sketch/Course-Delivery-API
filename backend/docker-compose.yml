@@ -1,0 +1,28 @@
+# Local Postgres: one database for development, a separate one the tests can wipe freely.
+# Ports 5433 and 5434 (not the usual 5432) so they never clash with another Postgres on this machine.
+# POSTGRES_PASSWORD comes from backend/.env.
+# Start: docker compose up -d     Stop: docker compose down
+name: course-delivery
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: course_delivery
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
+    ports:
+      - "5433:5432"
+    volumes:
+      - dev-data:/var/lib/postgresql/data
+
+  test-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: course_delivery_test
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
+    ports:
+      - "5434:5432"
+    # No volume: the tests rebuild this database from scratch on every run.
+
+volumes:
+  dev-data:

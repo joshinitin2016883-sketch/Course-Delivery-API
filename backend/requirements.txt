@@ -1,0 +1,15 @@
+# Exact versions, so local, test and Render installs match.
+# Install from backend/:  python -m pip install -r requirements.txt
+fastapi==0.141.1
+uvicorn==0.54.0
+sqlalchemy==2.0.54
+alembic==1.20.0
+pydantic==2.13.5
+pyjwt==2.15.1
+bcrypt==5.0.0
+psycopg[binary]==3.3.6
+python-dotenv==1.2.3
+
+# Tests only
+pytest==9.1.1
+httpx==0.28.1
