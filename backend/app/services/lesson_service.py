@@ -1,13 +1,15 @@
 """Adding, editing, reordering and removing a course's lessons. Every change is logged against the course.
 
 Positions always run 1, 2, 3, ... with no gaps, and each function keeps it that way.
+Each function locks the course row first (course_service.lock_course), like every other change to a course.
 """
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Action, Course, Lesson, User
+from app.models import Action, Lesson, User
 from app.schemas.lessons import LessonIn
 from app.services import activity_log
+from app.services.course_service import lock_course
 from app.services.errors import Conflict, NotFound
 from app.services.permissions import require_instructor
 
@@ -15,7 +17,7 @@ from app.services.permissions import require_instructor
 def add_lesson(db: Session, actor: User, course_id: int, data: LessonIn) -> Lesson:
     """Add a lesson at the end of the course's running order."""
     require_instructor(actor)
-    course = _lock_course(db, course_id)
+    course = lock_course(db, course_id)
     position = len(_lessons_in_order(db, course.id)) + 1
     lesson = Lesson(course_id=course.id, title=data.title, content=data.content, position=position)
     db.add(lesson)
@@ -29,7 +31,7 @@ def add_lesson(db: Session, actor: User, course_id: int, data: LessonIn) -> Less
 def edit_lesson(db: Session, actor: User, course_id: int, lesson_id: int, data: LessonIn) -> Lesson:
     """Edit a lesson's title and content. Its position only changes through reorder_lessons."""
     require_instructor(actor)
-    course = _lock_course(db, course_id)
+    course = lock_course(db, course_id)
     lesson = _get_lesson(db, course.id, lesson_id)
     changes = activity_log.apply_changes(lesson, data.model_dump())
     if changes:  # saving the same values again is not a change, so it isn't logged
@@ -42,7 +44,7 @@ def edit_lesson(db: Session, actor: User, course_id: int, lesson_id: int, data: 
 def remove_lesson(db: Session, actor: User, course_id: int, lesson_id: int) -> None:
     """Delete a lesson and close the gap it leaves. The log keeps its title and old position."""
     require_instructor(actor)
-    course = _lock_course(db, course_id)
+    course = lock_course(db, course_id)
     lesson = _get_lesson(db, course.id, lesson_id)
     details = {"lesson_id": lesson.id, "title": lesson.title, "position": lesson.position}
     activity_log.record(db, course.id, actor, Action.LESSON_REMOVED, details)
@@ -55,7 +57,7 @@ def remove_lesson(db: Session, actor: User, course_id: int, lesson_id: int) -> N
 def reorder_lessons(db: Session, actor: User, course_id: int, lesson_ids: list[int]) -> list[Lesson]:
     """Put the course's lessons in the given order. The list must name every lesson exactly once."""
     require_instructor(actor)
-    course = _lock_course(db, course_id)
+    course = lock_course(db, course_id)
     lessons = _lessons_in_order(db, course.id)
     current_ids = [lesson.id for lesson in lessons]
     # Comparing sorted lists catches a missing lesson, a lesson from elsewhere, and a repeated id.
@@ -72,15 +74,6 @@ def reorder_lessons(db: Session, actor: User, course_id: int, lesson_ids: list[i
     activity_log.record(db, course.id, actor, Action.LESSONS_REORDERED, {"from": current_ids, "to": lesson_ids})
     db.commit()
     return new_order
-
-
-def _lock_course(db: Session, course_id: int) -> Course:
-    """Load the course and lock its row until this transaction ends. Every lesson change takes
-    this lock first, so two changes to the same course's lessons run one after the other."""
-    course = db.get(Course, course_id, with_for_update=True)
-    if course is None:
-        raise NotFound("Course not found.")
-    return course
 
 
 def _get_lesson(db: Session, course_id: int, lesson_id: int) -> Lesson:

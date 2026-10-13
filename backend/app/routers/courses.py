@@ -25,3 +25,19 @@ def update_course(
     course_id: int, body: CourseIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
     return course_service.update_course(db, user, course_id, body)
+
+
+# The three moves between states. course_service.MOVES decides which are allowed from which status.
+@router.post("/{course_id}/publish", response_model=CourseOut)
+def publish_course(course_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return course_service.change_status(db, user, course_id, "publish")
+
+
+@router.post("/{course_id}/archive", response_model=CourseOut)
+def archive_course(course_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return course_service.change_status(db, user, course_id, "archive")
+
+
+@router.post("/{course_id}/restore", response_model=CourseOut)
+def restore_course(course_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return course_service.change_status(db, user, course_id, "restore")

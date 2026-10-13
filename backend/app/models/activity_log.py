@@ -20,6 +20,9 @@ class Action(StrEnum):
     LESSON_EDITED = "lesson_edited"
     LESSONS_REORDERED = "lessons_reordered"
     LESSON_REMOVED = "lesson_removed"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+    RESTORED = "restored"
 
 
 class ActivityLog(Base):
