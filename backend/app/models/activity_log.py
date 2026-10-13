@@ -6,7 +6,7 @@ Rows are only ever inserted. No code updates or deletes them, and a database tri
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, String, func, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,12 +29,22 @@ class Action(StrEnum):
 
 class ActivityLog(Base):
     __tablename__ = "activity_log"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('created', 'edited', 'lesson_added', 'lesson_edited', 'lessons_reordered', "
+            "'lesson_removed', 'published', 'archived', 'restored', 'commented')",
+            name="action_allowed",
+        ),
+        # Matches the feed's query: one course's entries, newest first by id (migration 0003).
+        Index("ix_activity_log_course_id_id", "course_id", "id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"))
     # Who made the change.
     actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    # One of Action. Checked in code rather than by the database, because each step adds new actions.
+    # One of Action. The database checks it too (migration 0003): this table is append-only,
+    # so a row with a wrong action could never be corrected afterwards.
     action: Mapped[str] = mapped_column(String(30))
     # What changed, e.g. {"title": {"from": "Old", "to": "New"}}. Lessons are named here rather than
     # linked by a foreign key, so the history still reads correctly after a lesson is removed.

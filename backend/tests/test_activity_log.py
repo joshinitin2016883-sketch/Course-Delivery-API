@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import delete, event, select, text, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.database import engine
 from app.models import Action, ActivityLog, Role
@@ -122,6 +122,23 @@ def test_the_database_refuses_to_delete_a_log_row(db, course_id):
 def test_the_database_refuses_to_empty_the_log(db, course_id):
     with pytest.raises(DBAPIError, match="append-only"):
         db.execute(text("TRUNCATE activity_log"))
+
+
+# --- The database checks the action (migration 0003) ----------------------------------------------
+
+
+def test_the_database_refuses_an_unknown_action(db, instructor, course_id):
+    db.add(ActivityLog(course_id=course_id, actor_id=instructor.id, action="deleted", details={}))
+
+    with pytest.raises(IntegrityError, match="ck_activity_log_action_allowed"):
+        db.flush()
+
+
+def test_the_database_accepts_every_action_the_code_defines(db, instructor, course_id):
+    """If someone adds an action to the code but not to the database check, this test fails."""
+    db.add_all(ActivityLog(course_id=course_id, actor_id=instructor.id, action=action, details={}) for action in Action)
+
+    db.flush()  # raises IntegrityError if any action is missing from the check
 
 
 # --- Comments -------------------------------------------------------------------------------------
