@@ -3,6 +3,7 @@
 A course moves Draft -> Published -> Archived, and Archived -> Published when restored. Each move is checked
 against one table (course_service.MOVES), and every other pair of status and move is refused.
 Every change to a course locks the course row before reading or writing anything.
+Archived courses are read-only, and a published course always keeps at least one lesson.
 """
 import re
 from contextlib import contextmanager
@@ -260,3 +261,62 @@ def test_every_change_locks_the_course_row_before_reading_or_writing(client, db,
     assert first_index(statements, COURSE_READ) == lock  # the first read of the course is the locking one
     assert lock < first_lesson_read
     assert lock < first_write
+
+
+# --- Archived courses are read-only ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["edit course", "add lesson", "edit lesson", "remove lesson", "reorder lessons"])
+def test_an_archived_course_cannot_be_changed(client, db, headers, kind):
+    course_id, lesson_ids = create_course(client, headers, ["Alarms", "Exits"])
+    set_status(db, course_id, CourseStatus.ARCHIVED)
+    course_before = client.get(f"/courses/{course_id}", headers=headers).json()
+    entries_before = len(log_entries(db, course_id))
+
+    response = send_change(client, headers, kind, course_id, lesson_ids)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "This course is archived, so it can't be changed. Restore it first."
+    db.expire_all()  # read the course back from the database, not from cached objects
+    assert client.get(f"/courses/{course_id}", headers=headers).json() == course_before
+    assert len(log_entries(db, course_id)) == entries_before
+
+
+# --- A published course keeps at least one lesson -------------------------------------------------
+
+
+def test_the_last_lesson_of_a_published_course_cannot_be_removed(client, db, headers):
+    course_id, [only_lesson] = create_course(client, headers, ["Alarms"])
+    set_status(db, course_id, CourseStatus.PUBLISHED)
+    entries_before = len(log_entries(db, course_id))
+
+    response = client.delete(f"/courses/{course_id}/lessons/{only_lesson}", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "A published course must keep at least one lesson. Add another lesson first, or archive the course."
+    )
+    db.expire_all()
+    assert db.get(Lesson, only_lesson) is not None
+    assert len(log_entries(db, course_id)) == entries_before
+
+
+def test_the_last_lesson_of_a_draft_can_be_removed(client, headers):
+    course_id, [only_lesson] = create_course(client, headers, ["Alarms"])
+
+    response = client.delete(f"/courses/{course_id}/lessons/{only_lesson}", headers=headers)
+
+    assert response.status_code == 204
+    assert client.get(f"/courses/{course_id}", headers=headers).json()["lessons"] == []
+
+
+def test_a_published_course_can_lose_a_lesson_while_another_remains(client, db, headers):
+    course_id, [alarms, _exits] = create_course(client, headers, ["Alarms", "Exits"])
+    set_status(db, course_id, CourseStatus.PUBLISHED)
+
+    response = client.delete(f"/courses/{course_id}/lessons/{alarms}", headers=headers)
+
+    assert response.status_code == 204
+    course = client.get(f"/courses/{course_id}", headers=headers).json()
+    assert course["status"] == "published"
+    assert [(lesson["title"], lesson["position"]) for lesson in course["lessons"]] == [("Exits", 1)]

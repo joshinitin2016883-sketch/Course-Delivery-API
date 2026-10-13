@@ -1,15 +1,16 @@
 """Adding, editing, reordering and removing a course's lessons. Every change is logged against the course.
 
 Positions always run 1, 2, 3, ... with no gaps, and each function keeps it that way.
-Each function locks the course row first (course_service.lock_course), like every other change to a course.
+Each function locks the course row first (course_service.lock_course), like every other change to a course,
+and refuses to change the lessons of an archived course.
 """
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Action, Lesson, User
+from app.models import Action, CourseStatus, Lesson, User
 from app.schemas.lessons import LessonIn
 from app.services import activity_log
-from app.services.course_service import lock_course
+from app.services.course_service import ensure_not_archived, lock_course
 from app.services.errors import Conflict, NotFound
 from app.services.permissions import require_instructor
 
@@ -18,6 +19,7 @@ def add_lesson(db: Session, actor: User, course_id: int, data: LessonIn) -> Less
     """Add a lesson at the end of the course's running order."""
     require_instructor(actor)
     course = lock_course(db, course_id)
+    ensure_not_archived(course)
     position = len(_lessons_in_order(db, course.id)) + 1
     lesson = Lesson(course_id=course.id, title=data.title, content=data.content, position=position)
     db.add(lesson)
@@ -32,6 +34,7 @@ def edit_lesson(db: Session, actor: User, course_id: int, lesson_id: int, data: 
     """Edit a lesson's title and content. Its position only changes through reorder_lessons."""
     require_instructor(actor)
     course = lock_course(db, course_id)
+    ensure_not_archived(course)
     lesson = _get_lesson(db, course.id, lesson_id)
     changes = activity_log.apply_changes(lesson, data.model_dump())
     if changes:  # saving the same values again is not a change, so it isn't logged
@@ -45,10 +48,16 @@ def remove_lesson(db: Session, actor: User, course_id: int, lesson_id: int) -> N
     """Delete a lesson and close the gap it leaves. The log keeps its title and old position."""
     require_instructor(actor)
     course = lock_course(db, course_id)
+    ensure_not_archived(course)
     lesson = _get_lesson(db, course.id, lesson_id)
+    remaining = [other for other in _lessons_in_order(db, course.id) if other.id != lesson.id]
+    # Publishing needs a lesson, so a published course may never be left with none.
+    if course.status == CourseStatus.PUBLISHED and not remaining:
+        raise Conflict(
+            "A published course must keep at least one lesson. Add another lesson first, or archive the course."
+        )
     details = {"lesson_id": lesson.id, "title": lesson.title, "position": lesson.position}
     activity_log.record(db, course.id, actor, Action.LESSON_REMOVED, details)
-    remaining = [other for other in _lessons_in_order(db, course.id) if other.id != lesson.id]
     db.delete(lesson)
     _renumber(remaining)
     db.commit()
@@ -58,6 +67,7 @@ def reorder_lessons(db: Session, actor: User, course_id: int, lesson_ids: list[i
     """Put the course's lessons in the given order. The list must name every lesson exactly once."""
     require_instructor(actor)
     course = lock_course(db, course_id)
+    ensure_not_archived(course)
     lessons = _lessons_in_order(db, course.id)
     current_ids = [lesson.id for lesson in lessons]
     # Comparing sorted lists catches a missing lesson, a lesson from elsewhere, and a repeated id.

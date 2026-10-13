@@ -60,11 +60,18 @@ def lock_course(db: Session, course_id: int) -> Course:
     return course
 
 
+def ensure_not_archived(course: Course) -> None:
+    """Archived courses are read-only: their details and lessons can't change until the course is restored."""
+    if course.status == CourseStatus.ARCHIVED:
+        raise Conflict("This course is archived, so it can't be changed. Restore it first.")
+
+
 def update_course(db: Session, actor: User, course_id: int, data: CourseIn) -> Course:
     """Edit the title, description and category. Any instructor may edit any course.
     The status can't be edited here: it only changes through change_status."""
     require_instructor(actor)
     course = lock_course(db, course_id)
+    ensure_not_archived(course)
     changes = activity_log.apply_changes(course, data.model_dump())
     if changes:  # saving the same values again is not a change, so it isn't logged
         activity_log.record(db, course.id, actor, Action.EDITED, changes)
