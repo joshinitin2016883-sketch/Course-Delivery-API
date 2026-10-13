@@ -1,4 +1,4 @@
-"""The activity_log table: an append-only history of every change to a course.
+"""The activity_log table: an append-only history of every change to a course, and the comments left on it.
 
 Rows are only ever inserted. No code updates or deletes them, and a database trigger
 (migration 0002) rejects any UPDATE, DELETE or TRUNCATE, whoever sends it.
@@ -8,9 +8,10 @@ from enum import StrEnum
 
 from sqlalchemy import DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.user import User
 
 
 class Action(StrEnum):
@@ -23,6 +24,7 @@ class Action(StrEnum):
     PUBLISHED = "published"
     ARCHIVED = "archived"
     RESTORED = "restored"
+    COMMENTED = "commented"
 
 
 class ActivityLog(Base):
@@ -38,3 +40,5 @@ class ActivityLog(Base):
     # linked by a foreign key, so the history still reads correctly after a lesson is removed.
     details: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    actor: Mapped[User] = relationship()

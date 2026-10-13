@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from app.models import ActivityLog, User
 
 
-def record(db: Session, course_id: int, actor: User, action: str, details: dict[str, Any]) -> None:
-    db.add(ActivityLog(course_id=course_id, actor_id=actor.id, action=action, details=details))
+def record(db: Session, course_id: int, actor: User, action: str, details: dict[str, Any]) -> ActivityLog:
+    entry = ActivityLog(course_id=course_id, actor_id=actor.id, action=action, details=details)
+    db.add(entry)
+    return entry
 
 
 def apply_changes(target: Any, new_values: dict[str, Any]) -> dict[str, Any]:
