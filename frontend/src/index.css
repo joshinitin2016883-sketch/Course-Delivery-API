@@ -69,4 +69,9 @@
   .input {
     @apply min-h-11 w-full rounded-lg border border-line bg-surface px-3 text-base text-ink;
   }
+
+  /* A small label such as "Enrolled" or "Draft". Each use adds its own colours. */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
 }
