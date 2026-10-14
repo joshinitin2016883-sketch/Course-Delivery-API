@@ -1,13 +1,24 @@
-"""Course endpoints. Each one validates the request and hands it to course_service."""
-from fastapi import APIRouter, Depends
+"""Course endpoints. Each one validates the request and hands it to a service."""
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.models import User
-from app.schemas.courses import CourseIn, CourseOut
-from app.services import course_service, enrollment_service
+from app.schemas.courses import CourseIn, CourseListQuery, CourseOut, CoursePage
+from app.services import catalogue_service, course_service, enrollment_service
 
 router = APIRouter(prefix="/courses", tags=["courses"])
+
+
+@router.get("", response_model=CoursePage)
+def list_courses(
+    query: Annotated[CourseListQuery, Query()],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return catalogue_service.list_courses(db, user, query)
 
 
 @router.post("", response_model=CourseOut, status_code=201)

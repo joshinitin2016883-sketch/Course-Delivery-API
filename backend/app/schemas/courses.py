@@ -1,10 +1,10 @@
 """Request and response bodies for courses."""
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from app.models import Category
+from app.models import Category, CourseStatus
 from app.schemas.enrollments import ProgressOut
 from app.schemas.lessons import LessonOut
 
@@ -44,3 +44,37 @@ class CourseOut(BaseModel):
     lessons: list[LessonOut]
     # Only for a learner enrolled in the course: their own progress. None for everyone else.
     my_progress: ProgressOut | None = None
+
+
+class CourseListQuery(BaseModel):
+    """The query parameters of GET /courses. A value outside these rules is a 422 before any query runs."""
+
+    q: str | None = Field(default=None, max_length=100)  # searched in titles and descriptions
+    category: Category | None = None
+    status: CourseStatus | None = None
+    instructor_id: int | None = None
+    sort: Literal["title", "created_at", "enrollment_count"] = "created_at"
+    order: Literal["asc", "desc"] | None = None  # when left out, each sort has its own default
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
+class CourseListItem(BaseModel):
+    """One row of the course list."""
+
+    id: int
+    title: str
+    description: str
+    category: str
+    status: str
+    created_at: datetime
+    instructor: InstructorOut
+    enrollment_count: int
+    enrolled: bool  # whether the viewer is enrolled; always false for instructors
+
+
+class CoursePage(BaseModel):
+    items: list[CourseListItem]
+    total: int  # every course that matches, not just this page
+    page: int
+    page_size: int
