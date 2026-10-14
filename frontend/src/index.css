@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/*
+  Design tokens. Pages use only these colours, through classes such as bg-surface, text-muted
+  and border-line. Tailwind's own palette is switched off, so no other colour can slip in.
+  Spacing, text sizes and corner radii use Tailwind's built-in scales (spacing steps are 4px).
+*/
+@theme {
+  --color-*: initial;
+  --color-page: #fafafa;
+  --color-surface: #ffffff;
+  --color-line: #e4e4e7;
+  --color-ink: #18181b;
+  --color-muted: #52525b;
+  --color-accent: #4f46e5;
+  --color-accent-strong: #4338ca;
+  --color-on-accent: #ffffff;
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-danger: #b91c1c;
+}
+
+/* Dark mode redefines the same tokens, so no component needs dark styles of its own. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-page: #101012;
+    --color-surface: #1a1a1e;
+    --color-line: #2e2e35;
+    --color-ink: #f0f0f2;
+    --color-muted: #a1a1aa;
+    --color-accent: #818cf8;
+    --color-accent-strong: #a5b4fc;
+    --color-on-accent: #101012;
+    --color-success: #4ade80;
+    --color-warning: #fbbf24;
+    --color-danger: #f87171;
+  }
+}
+
+@layer base {
+  :root {
+    /* Lets the browser draw scrollbars and form controls to match the theme. */
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--color-page);
+    color: var(--color-ink);
+    line-height: 1.6;
+  }
+
+  /* One visible focus ring for every link, button and input reached with the keyboard. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Shared styles for <button> elements and text inputs. All are at least 44px tall, so easy to tap. */
+@layer components {
+  .btn-primary {
+    @apply inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent transition-colors enabled:hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply inline-flex min-h-11 items-center justify-center rounded-lg border border-line bg-surface px-4 text-sm font-medium text-ink transition-colors enabled:hover:bg-page disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .input {
+    @apply min-h-11 w-full rounded-lg border border-line bg-surface px-3 text-base text-ink;
+  }
+}
