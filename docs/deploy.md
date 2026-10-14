@@ -4,6 +4,8 @@ The backend runs on Render's free tier against Postgres on Neon's free tier, bot
 database queries don't cross regions. Why it's set up this way: [Decision 23](decisions.md). The frontend
 is a set of static files on Vercel's free tier ([below](#the-frontend-on-vercel)).
 
+Live app: https://course-delivery-app.vercel.app
+
 Live API: https://course-delivery-api.onrender.com (interactive docs at `/docs`)
 
 ## Services

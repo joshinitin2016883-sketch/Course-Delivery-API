@@ -5,6 +5,7 @@
 - **Chose:** Sign-in returns a Bearer token (a JWT) that the frontend keeps in localStorage and sends in the Authorization header. It expires after 8 hours, and there are no refresh tokens.
 - **Rejected:** httpOnly cookies, and refresh tokens.
 - **Why:** The frontend (Vercel) and the API (Render) are on different sites, so cookies would mean cross-site cookie settings plus CSRF protection. Refresh tokens are more moving parts than a 12-hour project needs; after 8 hours you sign in again. The trade-off I accepted: a token in localStorage can be read by any XSS on the page.
+- **Updated in step 6b:** The frontend's defence against that XSS is Decision 28: lesson content, like every other text from the server, is shown as plain text and never as HTML.
 
 ## Decision 2: Where accounts come from
 
@@ -142,6 +143,7 @@
 - **Chose:** Run the migrations in Render's start command (`python -m alembic upgrade head && python -m uvicorn ...`), connect to Neon with its direct connection string, and keep `/health` free of database queries.
 - **Rejected:** A pre-deploy step for migrations, Neon's pooled connection string, and a health check that queries the database.
 - **Why:** Render's free tier has no shell and no pre-deploy command, so the start command is the only place the app can migrate itself. A failed migration stops uvicorn from starting, so a broken deploy fails loudly. The migration reruns on every wake from sleep, but at the latest version it does nothing, and with a single instance there's no race. Neon recommends a direct connection for migrations, and the app is one long-running process with its own small pool, so its connection pooler adds nothing; one URL serves both. Render calls `/health` repeatedly, and a database query there would keep waking Neon, which suspends after 5 idle minutes on the free plan, and use up its compute hours. A cold Neon could also fail a check and get the service restarted. The smoke test's logins prove the database works instead.
+- **Updated in step 6b:** `CORS_ORIGINS` lists exact origins only: the Vercel domain and `http://localhost:5173`. Vercel's preview deployments each get a domain of their own, so they are deliberately not allowed to call the API. Allowing them would take a wildcard that any site on vercel.app could use, not just this project.
 
 ## Decision 24: Searching courses
 
@@ -160,3 +162,34 @@
 - **Chose:** Sort titles by `lower(title) COLLATE "C"`, then by id.
 - **Rejected:** Sorting by the plain `title` column, or by `lower(title)` under the database's own collation.
 - **Why:** How text sorts depends on the database's collation, which can differ between environments. My local Postgres (Alpine) puts capitals first: "Apple, Zebra, apple, banana". `lower()` removes the difference in case, but the comparison would still use the database's collation, so titles that differ only in a space or punctuation could still come out in a different order on Alpine and on Neon. `COLLATE "C"` compares the lower-cased titles byte by byte, which gives the same order on every database, and the id tie-breaker keeps otherwise identical titles in a fixed order, so pages never repeat or skip a course. The cost is that accented letters sort after "z".
+
+## Decision 27: Who is signed in comes from GET /auth/me
+
+- **Chose:** The frontend learns who is signed in, with their name and role, from `GET /auth/me`: right after signing in, and again on every page load when a token is saved. It never reads anything out of the token itself.
+- **Rejected:** Decoding the JWT in the browser, and adding the name and role to the token.
+- **Why:** The token holds only the user's id and its expiry, and the server reads the role from the database on every request. Asking `/auth/me` means the page always shows the role the server enforces, even if it changed after the token was issued. The browser can't check a token's signature, so a decoded token could also be stale or edited, which would fool the page though never the server. The request on load also tests the saved token: an expired one sends you to sign in straight away, not after your first click.
+
+## Decision 28: Lesson content is plain text
+
+- **Chose:** Lesson content is shown as plain text with its line breaks kept (`white-space: pre-wrap`), and so is every other text from the server. Nothing in the frontend uses `dangerouslySetInnerHTML`, so HTML typed into a lesson shows as typed.
+- **Rejected:** Rendering lessons as HTML or as Markdown.
+- **Why:** This is the defence Decision 1 relies on. The token sits in localStorage, where any script running on the page can read it, and lesson content is the largest text that one person writes and many other people's browsers display. React escapes text, so as long as nothing is turned into HTML, a script in a lesson can't run. HTML or Markdown would need a sanitiser that is right every time. Plain lessons only need line breaks, and those are kept. If rich text is wanted later, it should come with a well-tested sanitiser and a Content-Security-Policy.
+
+## Decision 29: Hiding buttons is presentation; the server decides
+
+- **Chose:** Each page hides what the signed-in person can't use: Enrol and My courses for instructors, the status filter for learners, and Mark complete before enrolling or on an archived course. The API still enforces every one of these rules, and when it refuses, the page shows the server's own message.
+- **Rejected:** Showing every button and letting the server refuse, and treating the hidden buttons as the protection.
+- **Why:** Hiding what you can't use keeps each page clear. But anyone can call the API without the page, so the page can't be where the rules live. An instructor who enrols anyway gets a 403, completing a lesson before enrolling gets a 403, completing one in an archived course gets a 409, and a learner is never sent a draft. A page that's out of date, say a course archived while it's open, still ends with a clear answer: the server refuses, and the page shows why.
+
+## Decision 30: Listing instructors for the filter
+
+- **Chose:** `GET /instructors`, for any signed-in user, returning each instructor's id and full name (never the email), sorted like titles: `lower(full_name) COLLATE "C"`, then id. The course list's instructor filter offers these names.
+- **Rejected:** Taking the names from the courses on the current page, and a general `GET /users`.
+- **Why:** Goal 6 asks for a filter by instructor. The page holds only one page of courses, so its names would miss instructors whose courses are elsewhere in the list. A general users endpoint would expose learners. The instructors' names are already on every course row, so listing them reveals nothing new, and the query selects only the id and name, so the email can't leak. Sorting follows Decision 26, so names come out in the same order on every database.
+
+## Decision 31: Completing a lesson is final
+
+- **Chose:** A completed lesson stays completed. There's no undo and no "mark incomplete".
+- **Rejected:** An undo button, and a "mark incomplete" action.
+- **Why:** Goal 4 allows only Not Started → In Progress → Completed and says the server rejects any other move. Undoing would also rewrite the completions the dashboard counts (completions this month, and the eight-week chart), and break the inactivity alerts, which depend on when a learner last made progress. Learners lose nothing: a completed lesson's content stays visible, so they can re-read it whenever they like.
+- **Possible future improvement (not built):** A personal "Revisit later" checklist: a checkbox per lesson, like a Markdown task list, that the learner can tick and untick freely. It would be private to the learner, separate from Mark complete, and would never change progress, so it breaks no rule. It would need to look clearly different from the official "Done" badge, so nobody thinks Mark complete can be unticked.
