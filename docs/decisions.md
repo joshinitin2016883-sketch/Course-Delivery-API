@@ -136,3 +136,9 @@
 - **Chose:** Enrolments and completions aren't written to the activity log. They live in their own tables, with their times.
 - **Rejected:** Logging every enrolment and completion.
 - **Why:** The brief's goal 9 lists what the log records: when the course was created, every edit, every publish or archive transition, and comments. Enrolments and completions aren't on that list. They're learner activity rather than changes to the course, and logging them would bury the course's history under progress entries. The enrollments and lesson_completions tables already record who did what and when.
+
+## Decision 23: Deploying the API
+
+- **Chose:** Run the migrations in Render's start command (`python -m alembic upgrade head && python -m uvicorn ...`), connect to Neon with its direct connection string, and keep `/health` free of database queries.
+- **Rejected:** A pre-deploy step for migrations, Neon's pooled connection string, and a health check that queries the database.
+- **Why:** Render's free tier has no shell and no pre-deploy command, so the start command is the only place the app can migrate itself. A failed migration stops uvicorn from starting, so a broken deploy fails loudly. The migration reruns on every wake from sleep, but at the latest version it does nothing, and with a single instance there's no race. Neon recommends a direct connection for migrations, and the app is one long-running process with its own small pool, so its connection pooler adds nothing; one URL serves both. Render calls `/health` repeatedly, and a database query there would keep waking Neon, which suspends after 5 idle minutes on the free plan, and use up its compute hours. A cold Neon could also fail a check and get the service restarted. The smoke test's logins prove the database works instead.
