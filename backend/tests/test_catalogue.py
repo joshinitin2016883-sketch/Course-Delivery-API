@@ -184,6 +184,27 @@ def test_title_sort_ignores_case_and_breaks_ties_by_id(client, db, priya, as_pri
     assert ids(descending) == [cherry, banana_small, banana_capital, apple]
 
 
+def test_titles_that_differ_only_in_spaces_or_punctuation_sort_the_same_on_every_database(
+    client, db, priya, as_priya, recorded_sql
+):
+    # Byte order after lower(): space < "-" < "_" < letters. A linguistic collation (such as en_US on glibc,
+    # or ICU) skips spaces and punctuation at first, and could put these four in another order.
+    no_gap = add_course(db, priya.id, "Firstaid", minutes=1)
+    underscore = add_course(db, priya.id, "First_aid", minutes=2)
+    space = add_course(db, priya.id, "First aid", minutes=3)
+    hyphen = add_course(db, priya.id, "First-aid", minutes=4)
+
+    with recorded_sql() as statements:
+        ascending = list_courses(client, as_priya, sort="title", order="asc")
+    descending = list_courses(client, as_priya, sort="title", order="desc")
+
+    assert ids(ascending) == [space, hyphen, underscore, no_gap]
+    assert ids(descending) == [no_gap, underscore, hyphen, space]
+    # The local test database (Alpine) already sorts by bytes, so the order alone couldn't catch a missing
+    # COLLATE "C" here: the query itself has to ask for it.
+    assert any('lower(courses.title) COLLATE "C"' in statement for statement in statements)
+
+
 def test_creation_date_sort_breaks_ties_by_id(client, db, priya, as_priya):
     first = add_course(db, priya.id, "First", minutes=1)
     tie_a = add_course(db, priya.id, "Tie A", minutes=2)

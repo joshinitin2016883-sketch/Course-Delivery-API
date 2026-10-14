@@ -75,9 +75,10 @@ def _enrolled(viewer: User) -> ColumnElement[bool]:
 
 def _order_by(query: CourseListQuery, enrollment_count: ColumnElement[int]) -> list[ColumnElement]:
     """The chosen sort, then the course id in the same direction as a tie-breaker, so pages never repeat
-    or skip a course. Titles sort by lower(title), so the order doesn't depend on the database's collation."""
+    or skip a course. Titles sort by lower(title) COLLATE "C": lower() removes case, and "C" compares byte
+    by byte, so spaces and punctuation order the same way whatever the database's own collation is."""
     sort_column = {
-        "title": func.lower(Course.title),
+        "title": func.lower(Course.title).collate("C"),
         "created_at": Course.created_at,
         "enrollment_count": enrollment_count,
     }[query.sort]

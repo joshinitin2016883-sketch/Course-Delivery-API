@@ -142,3 +142,21 @@
 - **Chose:** Run the migrations in Render's start command (`python -m alembic upgrade head && python -m uvicorn ...`), connect to Neon with its direct connection string, and keep `/health` free of database queries.
 - **Rejected:** A pre-deploy step for migrations, Neon's pooled connection string, and a health check that queries the database.
 - **Why:** Render's free tier has no shell and no pre-deploy command, so the start command is the only place the app can migrate itself. A failed migration stops uvicorn from starting, so a broken deploy fails loudly. The migration reruns on every wake from sleep, but at the latest version it does nothing, and with a single instance there's no race. Neon recommends a direct connection for migrations, and the app is one long-running process with its own small pool, so its connection pooler adds nothing; one URL serves both. Render calls `/health` repeatedly, and a database query there would keep waking Neon, which suspends after 5 idle minutes on the free plan, and use up its compute hours. A cold Neon could also fail a check and get the service restarted. The smoke test's logins prove the database works instead.
+
+## Decision 24: Searching courses
+
+- **Chose:** A case-insensitive substring search (`ILIKE '%text%'`) over titles and descriptions, with `\`, `%` and `_` in the user's text escaped so they match themselves. No index for now.
+- **Rejected:** Postgres full-text search.
+- **Why:** Substring matching finds part of a word ("comp" finds "Compliance") and is easy to predict and explain. Full-text search handles word forms and ranking, but it misses partial words, drops English stop words, and needs a stored search column and an index before it's worth using. At this size Postgres reads the whole courses table in microseconds. With far more courses, a pg_trgm index would speed up exactly this ILIKE without changing the query.
+
+## Decision 25: Counting enrolments when the list is read
+
+- **Chose:** Count each course's enrolments inside the list query (a subquery on enrollments), counting every enrolment whatever its state.
+- **Rejected:** A stored enrollment_count column on courses, updated with each enrolment.
+- **Why:** A count worked out on read is always right, needs no migration, and nothing has to remember to keep it up to date. A stored counter would also clash with Decision 7: enrolling holds the course row `FOR SHARE`, and updating a counter on that row needs a stronger lock, so two learners enrolling in the same course at once would each wait for the other's shared lock, which is a deadlock. The cost is that sorting by enrolment count counts every matching course before choosing a page. That's the first thing to slow down at 100x the data, and the point to revisit, for example with a separate counts table that doesn't touch the course row.
+
+## Decision 26: Sorting titles by lower(title) COLLATE "C"
+
+- **Chose:** Sort titles by `lower(title) COLLATE "C"`, then by id.
+- **Rejected:** Sorting by the plain `title` column, or by `lower(title)` under the database's own collation.
+- **Why:** How text sorts depends on the database's collation, which can differ between environments. My local Postgres (Alpine) puts capitals first: "Apple, Zebra, apple, banana". `lower()` removes the difference in case, but the comparison would still use the database's collation, so titles that differ only in a space or punctuation could still come out in a different order on Alpine and on Neon. `COLLATE "C"` compares the lower-cased titles byte by byte, which gives the same order on every database, and the id tie-breaker keeps otherwise identical titles in a fixed order, so pages never repeat or skip a course. The cost is that accented letters sort after "z".
