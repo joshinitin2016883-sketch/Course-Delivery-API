@@ -4,6 +4,7 @@ import { enroll, listCourses, listInstructors } from "../api/courses";
 import { useAuth } from "../components/AuthProvider";
 import Pagination from "../components/Pagination";
 import { Empty, ErrorMessage, Loading } from "../components/States";
+import { CourseStatusBadge } from "../components/Status";
 
 // The same three categories as the API (backend/app/models/course.py).
 const CATEGORIES = [
@@ -28,12 +29,6 @@ const SORT_OPTIONS = [
   { value: "enrollment_count:desc", label: "Most enrolled" },
   { value: "enrollment_count:asc", label: "Fewest enrolled" },
 ];
-
-// Learners only ever get published courses. Instructors see these two states as well.
-const STATUS_BADGE_COLOURS = {
-  draft: "bg-warning/10 text-warning",
-  archived: "bg-line text-muted",
-};
 
 const SEARCH_DELAY_MS = 300;
 
@@ -312,9 +307,8 @@ function CourseRow({ course, canEnroll, onEnrolled }) {
           <Link to={`/courses/${course.id}`} className="font-medium hover:text-accent hover:underline">
             {course.title}
           </Link>
-          {course.status !== "published" && (
-            <span className={`badge capitalize ${STATUS_BADGE_COLOURS[course.status]}`}>{course.status}</span>
-          )}
+          {/* Only instructors get draft or archived courses here; learners only ever see published ones. */}
+          <CourseStatusBadge status={course.status} />
         </div>
         <p className="mt-1 line-clamp-2 text-sm text-muted">{course.description}</p>
         <p className="mt-1 text-sm text-muted">

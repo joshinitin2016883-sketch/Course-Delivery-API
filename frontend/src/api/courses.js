@@ -21,3 +21,19 @@ export function listInstructors() {
 export function enroll(courseId) {
   return apiRequest(`/courses/${courseId}/enroll`, { method: "POST" });
 }
+
+// One course with its lessons in order. The server sends a learner the lessons' content, and their own
+// progress (my_progress), only once they are enrolled.
+export function getCourse(courseId) {
+  return apiRequest(`/courses/${courseId}`);
+}
+
+// Answers with the learner's progress in the course after this lesson is marked complete.
+export function completeLesson(courseId, lessonId) {
+  return apiRequest(`/courses/${courseId}/lessons/${lessonId}/complete`, { method: "POST" });
+}
+
+// Every course the learner is enrolled in, newest enrolment first, with their progress in each.
+export function listMyCourses() {
+  return apiRequest("/me/courses");
+}
