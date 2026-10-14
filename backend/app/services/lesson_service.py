@@ -7,9 +7,9 @@ and refuses to change the lessons of an archived course.
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Action, CourseStatus, Lesson, User
+from app.models import Action, CourseStatus, Lesson, LessonCompletion, User
 from app.schemas.lessons import LessonIn
-from app.services import activity_log
+from app.services import activity_log, enrollment_service
 from app.services.course_service import ensure_not_archived, lock_course
 from app.services.errors import Conflict, NotFound
 from app.services.permissions import require_instructor
@@ -45,11 +45,14 @@ def edit_lesson(db: Session, actor: User, course_id: int, lesson_id: int, data: 
 
 
 def remove_lesson(db: Session, actor: User, course_id: int, lesson_id: int) -> None:
-    """Delete a lesson and close the gap it leaves. The log keeps its title and old position."""
+    """Delete a lesson and close the gap it leaves. The log keeps its title and old position.
+    A lesson that any learner has completed can't be removed (the database refuses it too)."""
     require_instructor(actor)
     course = lock_course(db, course_id)
     ensure_not_archived(course)
     lesson = _get_lesson(db, course.id, lesson_id)
+    if _anyone_completed(db, lesson):
+        raise Conflict("Learners have completed this lesson, so it can't be removed. You can still edit it.")
     remaining = [other for other in _lessons_in_order(db, course.id) if other.id != lesson.id]
     # Publishing needs a lesson, so a published course may never be left with none.
     if course.status == CourseStatus.PUBLISHED and not remaining:
@@ -60,6 +63,8 @@ def remove_lesson(db: Session, actor: User, course_id: int, lesson_id: int) -> N
     activity_log.record(db, course.id, actor, Action.LESSON_REMOVED, details)
     db.delete(lesson)
     _renumber(remaining)
+    # Anyone who had done every other lesson has now finished the course.
+    enrollment_service.complete_learners_with_nothing_left(db, course)
     db.commit()
 
 
@@ -92,6 +97,10 @@ def _get_lesson(db: Session, course_id: int, lesson_id: int) -> Lesson:
     if lesson is None or lesson.course_id != course_id:
         raise NotFound("Lesson not found in this course.")
     return lesson
+
+
+def _anyone_completed(db: Session, lesson: Lesson) -> bool:
+    return db.scalar(select(LessonCompletion.id).where(LessonCompletion.lesson_id == lesson.id).limit(1)) is not None
 
 
 def _lessons_in_order(db: Session, course_id: int) -> list[Lesson]:

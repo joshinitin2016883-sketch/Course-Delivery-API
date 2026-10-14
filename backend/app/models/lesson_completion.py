@@ -17,5 +17,6 @@ class LessonCompletion(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     enrollment_id: Mapped[int] = mapped_column(ForeignKey("enrollments.id"))
     # RESTRICT: the database refuses to delete a lesson that any learner has completed.
-    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="RESTRICT"))
+    # Indexed (migration 0005) so that check, and "has anyone completed this lesson?", don't scan the table.
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="RESTRICT"), index=True)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
