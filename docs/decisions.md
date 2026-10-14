@@ -41,12 +41,14 @@
 - **Chose:** Every change to a course (the three moves, editing the course, and adding, editing, reordering or removing a lesson) first locks the course's row with `SELECT ... FOR UPDATE`.
 - **Rejected:** No locking, and optimistic version numbers.
 - **Why:** Without a lock, publishing a course and removing its last lesson at the same moment could both succeed, leaving a published course with no lessons. Version numbers would mean more code and a retry path, for a couple of instructors. A test captures the SQL each change sends and checks the lock comes first, and I also checked it by hand with two terminals.
+- **Updated in step 4:** Enrolling and completing a lesson take the course row `FOR SHARE` instead, and completing a lesson then locks the learner's enrolment row `FOR UPDATE`. That's the same course-first order as every other change, so completions don't block each other, they wait for an archive or a lesson removal (which waits for them in turn), and these requests can't deadlock each other.
 
 ## Decision 8: What learners see in the log
 
 - **Chose:** Learners see only the comments in a course's log, and only on courses they can see. Instructors see everything.
 - **Rejected:** Showing learners the whole log, and keeping the log instructors-only.
 - **Why:** The whole log holds old values from when the course was still a draft, which learners were never meant to see. Instructors-only would mean a learner could post a question and never read the reply.
+- **Updated in step 4:** A learner now has to be enrolled to read the comments or comment (Decision 20).
 
 ## Decision 9: Paging the feed
 
@@ -72,9 +74,65 @@
 - **Chose:** When an instructor removes a lesson, it is permanently deleted from the database. However, its title and position are saved in the activity log so the history remains clear.
 - **Rejected:** Keeping the lesson in the database with a flag marking it as removed.
 - **Why:** At this stage, nothing else depends on a lesson, so permanently deleting it is the simplest approach. The activity log stores the lesson details separately, making it possible to see what was removed later. I'll revisit this in step 4, because deleting a lesson that learners have already completed will need additional rules.
+- **Updated in step 4:** A lesson that any learner has completed can no longer be deleted (Decision 15). Lessons nobody has completed are still deleted outright.
 
 ## Decision 13: Comments on archived courses
 
 - **Chose:** Instructors can continue adding comments to archived courses.
 - **Rejected:** Making archived courses completely read-only, including their comments.
 - **Why:** Archiving a course should prevent changes to its content without stopping further discussion. For example, an instructor might want to explain why a course was retired. For now, only instructors can comment on archived courses because learners cannot access them. I'll decide in step 4 whether enrolled learners should keep access to archived courses.
+- **Updated in step 4:** Enrolled learners keep read-only access to archived courses, so they can comment there too (Decision 17).
+
+## Decision 14: Completing a lesson
+
+- **Chose:** A learner presses "Mark complete" on each lesson. The server works out their state for the course (Not started, In progress, Completed) from those completions, through one table of allowed moves. Nobody sets it by hand.
+- **Rejected:** Counting a lesson as done when it's opened, and letting anyone set a learner's status directly.
+- **Why:** The brief's complaint is not being able to tell who finished a course from who "merely opened it once", so opening a lesson can't count. A status anyone can set is the self-reported spreadsheet again. Because the state comes from completions, the only moves that can happen are Not started → In progress → Completed, which is all the brief allows. The database also refuses an enrolment whose status and times disagree (CHECKs tying the status to started_at, completed_at and last_activity_at), so even a bug in the service can't store an impossible state.
+
+## Decision 15: Removing a lesson that learners have completed
+
+- **Chose:** Refuse it with a 409. The service checks first, and a RESTRICT foreign key from lesson_completions makes the database refuse it too. Lessons nobody has completed are still deleted outright, and an index on lesson_completions.lesson_id keeps both checks fast.
+- **Rejected:** Deleting the learners' completions along with the lesson, and keeping removed lessons with a "removed" flag.
+- **Why:** A completion is a record of what a learner did. Deleting it would quietly rewrite their history. A flag would have to be filtered out of every query. Instructors can still edit a lesson that has been completed.
+
+## Decision 16: Progress when lessons change
+
+- **Chose:** Adding a lesson never moves a learner back: someone who completed the course stays Completed and sees, say, 5 of 6. Removing a lesson moves every In-progress learner who has now done all the remaining lessons to Completed, in the same transaction, with completed_at set to the removal time and last_activity_at left alone.
+- **Rejected:** Recomputing each learner's state from scratch whenever the lessons change, and leaving learners In progress when there's nothing left for them to do.
+- **Why:** The brief only allows Not started → In progress → Completed, and recomputing could move a Completed learner back. Leaving finished learners In progress would strand them with nothing to complete, and they'd show up as inactive after 14 days. Finishing them after a removal runs two queries per In-progress learner, which is fine at this size; with many more learners it would become one grouped query.
+
+## Decision 17: Archived courses and enrolled learners
+
+- **Chose:** Enrolled learners keep read-only access to an archived course. It stays in My courses, marked as archived, and they can open it, read its lessons, comment and read the comments. Completing a lesson there gets a 409. Learners who aren't enrolled get the same 404 as for a course that doesn't exist.
+- **Rejected:** Hiding archived courses from everyone, and letting learners keep making progress in them.
+- **Why:** The brief says archiving removes a course from the catalogue without deleting any learner's enrolment history, so learners should still see their own record. Archived means retired, though, so their progress there is frozen.
+
+## Decision 18: Enrolling
+
+- **Chose:** Learners enrol themselves, in published courses only (instructors will enrol learners through bulk enrolment, later). Enrolling takes a shared lock on the course row, so an archive can't slip in at the same moment. The unique constraint on course and learner is the "already enrolled" check.
+- **Rejected:** Enrolling in drafts or archived courses, and checking for an existing enrolment in code before inserting.
+- **Why:** A draft isn't finished and an archived course is retired, so neither should take new learners. A check in code can't stop two requests that arrive together. The database constraint can, and both cases end in the same 409.
+
+## Decision 19: What learners see before enrolling
+
+- **Chose:** Before enrolling, a learner sees a published course's title, description and lesson titles, but not the lessons' content.
+- **Rejected:** Showing everything, and showing only the title and description.
+- **Why:** The lesson titles are enough to decide whether to take a course. The content is for enrolled learners, whose progress is tracked. If everyone could read it, people could work through a course without it ever showing up in anyone's records.
+
+## Decision 20: Joining a course's discussion
+
+- **Chose:** A learner has to be enrolled to comment or read the comments. A learner who can see the course but isn't enrolled gets a 403 ("Enrol in this course to join the discussion"). A course they can't see is still a 404. Instructors can join any course's discussion.
+- **Rejected:** Letting any learner who can see the course join in.
+- **Why:** The discussion belongs to the people taking the course. Checking visibility before enrolment means the 403 never reveals a course a learner isn't allowed to know about.
+
+## Decision 21: Unenrolling
+
+- **Chose:** No unenrolling in this version.
+- **Rejected:** An endpoint that removes an enrolment.
+- **Why:** The brief doesn't ask for it, and it would need rules for what happens to the learner's completions and history, which the brief says must be kept.
+
+## Decision 22: What goes in the activity log
+
+- **Chose:** Enrolments and completions aren't written to the activity log. They live in their own tables, with their times.
+- **Rejected:** Logging every enrolment and completion.
+- **Why:** The brief's goal 9 lists what the log records: when the course was created, every edit, every publish or archive transition, and comments. Enrolments and completions aren't on that list. They're learner activity rather than changes to the course, and logging them would bury the course's history under progress entries. The enrollments and lesson_completions tables already record who did what and when.
