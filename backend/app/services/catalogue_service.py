@@ -1,5 +1,6 @@
 """Finding courses (goal 6): one list of every course the viewer can see, with search, filters, sorting
-and pages. All of it happens in the database: one query for the page, and one for the total."""
+and pages. All of it happens in the database: one query for the page, and one for the total.
+Also the list of instructors that the instructor filter offers."""
 from sqlalchemy import ColumnElement, exists, false, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,18 @@ def list_courses(db: Session, viewer: User, query: CourseListQuery) -> CoursePag
         page=query.page,
         page_size=query.page_size,
     )
+
+
+def list_instructors(db: Session) -> list[InstructorOut]:
+    """Every instructor, for the instructor filter: id and name only, never the email. Any signed-in user may
+    see this, because the same names are already on every course row. Sorted by name the way titles are:
+    lower(name) COLLATE "C", then id."""
+    rows = db.execute(
+        select(User.id, User.full_name)
+        .where(User.role == Role.INSTRUCTOR)
+        .order_by(func.lower(User.full_name).collate("C"), User.id)
+    ).all()
+    return [InstructorOut(id=user_id, full_name=full_name) for user_id, full_name in rows]
 
 
 def _visible_to(viewer: User) -> list[ColumnElement[bool]]:
