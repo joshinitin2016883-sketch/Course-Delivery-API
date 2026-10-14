@@ -7,3 +7,9 @@ def require_instructor(user: User) -> None:
     """Stop the request unless the caller is an instructor."""
     if user.role != Role.INSTRUCTOR:
         raise PermissionDenied("Only instructors can do this.")
+
+
+def require_learner(user: User) -> None:
+    """Stop the request unless the caller is a learner."""
+    if user.role != Role.LEARNER:
+        raise PermissionDenied("Only learners can do this.")

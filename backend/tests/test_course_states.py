@@ -5,13 +5,9 @@ against one table (course_service.MOVES), and every other pair of status and mov
 Every change to a course locks the course row before reading or writing anything.
 Archived courses are read-only, and a published course always keeps at least one lesson.
 """
-import re
-from contextlib import contextmanager
-
 import pytest
-from sqlalchemy import delete, event, select
+from sqlalchemy import delete, select
 
-from app.core.database import engine
 from app.models import Action, ActivityLog, Course, CourseStatus, Lesson, Role
 
 FIRE_SAFETY = {"title": "Fire safety", "description": "What to do when the alarm goes off.", "category": "compliance"}
@@ -181,30 +177,7 @@ def test_editing_a_course_never_changes_its_status(client, db, headers):
 
 
 # --- Every change locks the course row first ------------------------------------------------------
-
-
-@contextmanager
-def recorded_sql():
-    """Collect every SQL statement sent to the database while the block runs."""
-    statements = []
-
-    def record(conn, cursor, statement, parameters, context, executemany):
-        statements.append(statement)
-
-    event.listen(engine, "before_cursor_execute", record)
-    try:
-        yield statements
-    finally:
-        event.remove(engine, "before_cursor_execute", record)
-
-
-def first_index(statements, pattern):
-    """Position of the first statement matching the regular expression, or None if none does."""
-    for index, statement in enumerate(statements):
-        if re.search(pattern, statement, re.IGNORECASE | re.DOTALL):
-            return index
-    return None
-
+# recorded_sql and first_index are fixtures from conftest.py.
 
 COURSE_LOCK = r"^\s*SELECT\b.*\bFROM courses\b.*\bFOR UPDATE\b"
 COURSE_READ = r"^\s*SELECT\b.*\bFROM courses\b"
@@ -245,7 +218,9 @@ def send_change(client, headers, kind, course_id, lesson_ids):
         ("reorder lessons", "draft"),
     ],
 )
-def test_every_change_locks_the_course_row_before_reading_or_writing(client, db, headers, kind, start):
+def test_every_change_locks_the_course_row_before_reading_or_writing(
+    client, db, headers, recorded_sql, first_index, kind, start
+):
     course_id, lesson_ids = create_course(client, headers, ["Alarms", "Exits"])
     set_status(db, course_id, start)
 

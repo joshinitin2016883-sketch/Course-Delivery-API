@@ -20,11 +20,14 @@ if os.environ["TEST_DATABASE_URL"] == os.environ.get("DATABASE_URL"):
 os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
 # Only now import the app, so that it connects to the test database.
+import re
+from contextlib import contextmanager
+
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
 from app.core.database import engine
@@ -89,3 +92,36 @@ def auth_header():
         return {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
     return _auth_header
+
+
+@pytest.fixture
+def recorded_sql():
+    """`with recorded_sql() as statements:` collects every SQL statement sent to the database in the block."""
+
+    @contextmanager
+    def _recorded_sql():
+        statements = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            yield statements
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+
+    return _recorded_sql
+
+
+@pytest.fixture
+def first_index():
+    """first_index(statements, pattern): position of the first statement matching the regular expression, or None."""
+
+    def _first_index(statements, pattern):
+        for index, statement in enumerate(statements):
+            if re.search(pattern, statement, re.IGNORECASE | re.DOTALL):
+                return index
+        return None
+
+    return _first_index

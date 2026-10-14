@@ -37,14 +37,16 @@ def create_course(db: Session, actor: User, data: CourseIn) -> Course:
 
 
 def get_course(db: Session, viewer: User, course_id: int) -> Course:
-    """A course the viewer may see. Instructors see every course; learners only published ones.
-    For a learner, any other course is "not found", so they can't tell that a draft exists."""
+    """A course the viewer may see. Any other course is "not found", so a learner can't tell that a draft exists."""
     course = db.get(Course, course_id)
-    if course is None:
-        raise NotFound("Course not found.")
-    if viewer.role != Role.INSTRUCTOR and course.status != CourseStatus.PUBLISHED:
+    if course is None or not can_see(viewer, course):
         raise NotFound("Course not found.")
     return course
+
+
+def can_see(viewer: User, course: Course) -> bool:
+    """Instructors see every course; learners only published ones."""
+    return viewer.role == Role.INSTRUCTOR or course.status == CourseStatus.PUBLISHED
 
 
 def lock_course(db: Session, course_id: int) -> Course:
@@ -55,6 +57,19 @@ def lock_course(db: Session, course_id: int) -> Course:
     lesson could both succeed at the same moment.
     """
     course = db.get(Course, course_id, with_for_update=True)
+    if course is None:
+        raise NotFound("Course not found.")
+    return course
+
+
+def lock_course_for_share(db: Session, course_id: int) -> Course:
+    """Load the course and take a shared lock on its row until this transaction ends (SELECT ... FOR SHARE).
+
+    Learner actions that depend on the course's state, such as enrolling, take this lock. Many of them
+    can hold it at once, but a change that takes lock_course (an archive, say) waits for them, and they
+    wait for it. So nobody can enrol at the very moment a course is archived.
+    """
+    course = db.get(Course, course_id, with_for_update={"read": True})
     if course is None:
         raise NotFound("Course not found.")
     return course

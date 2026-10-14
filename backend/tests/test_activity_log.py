@@ -4,13 +4,10 @@ Every change to a course adds a log row naming who made it, and the database ref
 delete log rows afterwards, no matter who asks. Comments are log rows too. The activity feed shows the
 log newest first: every entry to instructors, only the comments to learners.
 """
-from contextlib import contextmanager
-
 import pytest
-from sqlalchemy import delete, event, select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.core.database import engine
 from app.models import Action, ActivityLog, Role
 
 FIRE_SAFETY = {"title": "Fire safety", "description": "What to do when the alarm goes off.", "category": "compliance"}
@@ -57,21 +54,6 @@ def feed(client, headers, course_id, **params):
 def labels(entries):
     """Each feed entry as a short label: a comment shows its text, any other entry its action."""
     return [entry["details"].get("text", entry["action"]) for entry in entries]
-
-
-@contextmanager
-def recorded_sql():
-    """Collect every SQL statement sent to the database while the block runs."""
-    statements = []
-
-    def record(conn, cursor, statement, parameters, context, executemany):
-        statements.append(statement)
-
-    event.listen(engine, "before_cursor_execute", record)
-    try:
-        yield statements
-    finally:
-        event.remove(engine, "before_cursor_execute", record)
 
 
 # --- Every change is logged -----------------------------------------------------------------------
@@ -311,7 +293,7 @@ def test_the_page_size_must_be_between_1_and_100(client, instructor, auth_header
 
 
 def test_a_page_takes_the_same_number_of_queries_however_many_people_are_on_it(
-    client, db, make_user, instructor, auth_header
+    client, db, make_user, instructor, auth_header, recorded_sql
 ):
     """A page's actors are loaded together with its entries, not with one query per entry."""
     as_instructor = auth_header(instructor)
