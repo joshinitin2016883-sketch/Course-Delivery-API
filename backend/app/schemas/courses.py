@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from app.models import Category
+from app.schemas.enrollments import ProgressOut
 from app.schemas.lessons import LessonOut
 
 # Spaces around the text are removed before the length is checked, so "   " counts as empty.
@@ -41,3 +42,5 @@ class CourseOut(BaseModel):
     instructor: InstructorOut
     created_at: datetime
     lessons: list[LessonOut]
+    # Only for a learner enrolled in the course: their own progress. None for everyone else.
+    my_progress: ProgressOut | None = None

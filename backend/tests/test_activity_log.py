@@ -2,7 +2,8 @@
 
 Every change to a course adds a log row naming who made it, and the database refuses to change or
 delete log rows afterwards, no matter who asks. Comments are log rows too. The activity feed shows the
-log newest first: every entry to instructors, only the comments to learners.
+log newest first: every entry to instructors, only the comments to learners. A learner has to be enrolled
+to comment or read the feed.
 """
 import pytest
 from sqlalchemy import delete, select, text, update
@@ -41,6 +42,11 @@ def archive_new_course(client, headers):
     course_id = publish_new_course(client, headers)
     client.post(f"/courses/{course_id}/archive", headers=headers)
     return course_id
+
+
+def enroll(client, headers, course_id):
+    response = client.post(f"/courses/{course_id}/enroll", headers=headers)
+    assert response.status_code == 201
 
 
 def comment(client, headers, course_id, comment_text):
@@ -152,13 +158,40 @@ def test_a_comment_of_exactly_2000_characters_is_accepted(client, instructor, au
     assert response.status_code == 201
 
 
-def test_a_learner_can_comment_on_a_published_course(client, instructor, learner, auth_header):
+def test_an_enrolled_learner_can_comment(client, instructor, learner, auth_header):
     course_id = publish_new_course(client, auth_header(instructor))
+    enroll(client, auth_header(learner), course_id)
 
     response = comment(client, auth_header(learner), course_id, "Is the east exit still blocked?")
 
     assert response.status_code == 201
     assert response.json()["actor"] == {"id": learner.id, "full_name": "Alex Chen", "role": "learner"}
+
+
+def test_a_learner_who_can_see_the_course_but_is_not_enrolled_gets_403(client, db, instructor, learner, auth_header):
+    course_id = publish_new_course(client, auth_header(instructor))
+    as_learner = auth_header(learner)
+
+    commenting = comment(client, as_learner, course_id, "Can I ask something first?")
+    reading = feed(client, as_learner, course_id)
+
+    assert commenting.status_code == reading.status_code == 403
+    assert commenting.json() == reading.json() == {"detail": "Enrol in this course to join the discussion."}
+    assert db.scalar(select(ActivityLog).where(ActivityLog.action == Action.COMMENTED)) is None
+
+
+def test_an_enrolled_learner_can_comment_on_and_read_an_archived_course(client, instructor, learner, auth_header):
+    as_instructor, as_learner = auth_header(instructor), auth_header(learner)
+    course_id = publish_new_course(client, as_instructor)
+    enroll(client, as_learner, course_id)
+    client.post(f"/courses/{course_id}/archive", headers=as_instructor)
+
+    commenting = comment(client, as_learner, course_id, "Will this come back next year?")
+    reading = feed(client, as_learner, course_id)
+
+    assert commenting.status_code == 201
+    assert reading.status_code == 200
+    assert labels(reading.json()) == ["Will this come back next year?"]
 
 
 def test_a_learner_gets_the_same_404_when_commenting_on_a_draft_an_archived_or_a_missing_course(
@@ -207,6 +240,7 @@ def test_the_database_refuses_to_delete_a_comment(client, db, instructor, auth_h
 def test_instructors_see_every_entry_newest_first_with_who_made_it(client, instructor, learner, auth_header):
     as_instructor = auth_header(instructor)
     course_id = publish_new_course(client, as_instructor)
+    enroll(client, auth_header(learner), course_id)  # enrolling isn't a change to the course, so it isn't logged
     comment(client, auth_header(learner), course_id, "When is the next fire drill?")
     comment(client, as_instructor, course_id, "Next Tuesday.")
     client.post(f"/courses/{course_id}/archive", headers=as_instructor)
@@ -231,6 +265,7 @@ def test_instructors_see_every_entry_newest_first_with_who_made_it(client, instr
 def test_learners_see_only_the_comments(client, instructor, learner, auth_header):
     as_instructor = auth_header(instructor)
     course_id = publish_new_course(client, as_instructor)
+    enroll(client, auth_header(learner), course_id)
     comment(client, auth_header(learner), course_id, "When is the next fire drill?")
     comment(client, as_instructor, course_id, "Next Tuesday.")
 
@@ -302,6 +337,7 @@ def test_a_page_takes_the_same_number_of_queries_however_many_people_are_on_it(
     def queries_to_read_a_page_with_comments_from(commenters):
         course_id = publish_new_course(client, as_instructor)
         for headers in commenters:
+            enroll(client, headers, course_id)
             comment(client, headers, course_id, "Hello")
         # Empty the session's cache first. Otherwise the users created above would come from memory,
         # and even one-query-per-entry code would send no extra queries.

@@ -4,7 +4,7 @@ from typing import NamedTuple
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Action, Course, CourseStatus, Lesson, Role, User
+from app.models import Action, Course, CourseStatus, Enrollment, Lesson, Role, User
 from app.schemas.courses import CourseIn
 from app.services import activity_log
 from app.services.errors import Conflict, NotFound
@@ -39,14 +39,23 @@ def create_course(db: Session, actor: User, data: CourseIn) -> Course:
 def get_course(db: Session, viewer: User, course_id: int) -> Course:
     """A course the viewer may see. Any other course is "not found", so a learner can't tell that a draft exists."""
     course = db.get(Course, course_id)
-    if course is None or not can_see(viewer, course):
+    if course is None or not can_see(db, viewer, course):
         raise NotFound("Course not found.")
     return course
 
 
-def can_see(viewer: User, course: Course) -> bool:
-    """Instructors see every course; learners only published ones."""
-    return viewer.role == Role.INSTRUCTOR or course.status == CourseStatus.PUBLISHED
+def can_see(db: Session, viewer: User, course: Course) -> bool:
+    """Instructors see every course. Learners see published courses, and archived courses they are
+    enrolled in (read-only). Learners never see drafts."""
+    if viewer.role == Role.INSTRUCTOR or course.status == CourseStatus.PUBLISHED:
+        return True
+    return course.status == CourseStatus.ARCHIVED and find_enrollment(db, course.id, viewer.id) is not None
+
+
+def find_enrollment(db: Session, course_id: int, user_id: int) -> Enrollment | None:
+    """The user's enrolment in the course, if they have one. It lives here because who can see a course
+    depends on it, and the other services already import this one."""
+    return db.scalar(select(Enrollment).where(Enrollment.course_id == course_id, Enrollment.user_id == user_id))
 
 
 def lock_course(db: Session, course_id: int) -> Course:

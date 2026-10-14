@@ -28,6 +28,25 @@ class EnrollmentOut(BaseModel):
     last_activity_at: datetime | None
 
 
+class LearnerOut(BaseModel):
+    id: int
+    full_name: str
+    email: str
+
+
+class LearnerProgressOut(BaseModel):
+    """One enrolled learner's progress, as instructors see it on a course's progress list."""
+
+    learner: LearnerOut
+    status: str
+    lessons_done: int
+    lessons_total: int
+    enrolled_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    last_activity_at: datetime | None
+
+
 class ProgressOut(BaseModel):
     """A learner's own progress through one course, including which lessons they have completed."""
 

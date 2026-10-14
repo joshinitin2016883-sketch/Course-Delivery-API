@@ -26,5 +26,6 @@ class LessonOut(BaseModel):
 
     id: int
     title: str
-    content: str
+    # None for a learner who hasn't enrolled yet: they see the lesson titles but not what's in them.
+    content: str | None
     position: int

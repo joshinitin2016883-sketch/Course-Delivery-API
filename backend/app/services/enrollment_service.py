@@ -1,7 +1,8 @@
-"""Enrolling learners in courses, completing lessons, and each learner's own list of courses.
+"""Enrolling learners in courses, completing lessons, and what each person sees of a course's progress.
 
 A learner's progress through a course moves Not started -> In progress -> Completed. Nobody sets it
 by hand: it moves as they complete lessons, through the one table of allowed moves below.
+A learner only ever sees their own progress; instructors see everyone's.
 """
 from datetime import datetime, timezone
 
@@ -10,11 +11,12 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Course, Enrollment, EnrollmentStatus, Lesson, LessonCompletion, User
-from app.schemas.enrollments import CourseSummaryOut, EnrollmentOut, ProgressOut
+from app.models import Course, CourseStatus, Enrollment, EnrollmentStatus, Lesson, LessonCompletion, Role, User
+from app.schemas.courses import CourseOut
+from app.schemas.enrollments import CourseSummaryOut, EnrollmentOut, LearnerOut, LearnerProgressOut, ProgressOut
 from app.services import course_service
 from app.services.errors import Conflict, NotFound, PermissionDenied
-from app.services.permissions import require_learner
+from app.services.permissions import require_instructor, require_learner
 
 # The only moves an enrolment can make. Any other move would be a bug in this file, so _move refuses it.
 PROGRESS_MOVES = {
@@ -24,12 +26,13 @@ PROGRESS_MOVES = {
 
 
 def enroll(db: Session, learner: User, course_id: int) -> EnrollmentOut:
-    """Enrol the learner in a course. Learners can only see published courses, so only a published
-    course takes new enrolments; any other course is "not found"."""
+    """Enrol the learner in a course. Learners see published courses, plus archived ones they are already
+    enrolled in, so a new enrolment only ever lands on a published course: enrolling again in an archived
+    course is "already enrolled", and any other course is "not found"."""
     require_learner(learner)  # before the lookup, so an instructor gets 403 even for a course that doesn't exist
     # A shared lock: an archive has to wait until this enrolment is saved, and the other way round.
     course = course_service.lock_course_for_share(db, course_id)
-    if not course_service.can_see(learner, course):
+    if not course_service.can_see(db, learner, course):
         raise NotFound("Course not found.")
     enrollment = Enrollment(course_id=course.id, user_id=learner.id, enrolled_by=learner.id)
     db.add(enrollment)
@@ -54,7 +57,7 @@ def complete_lesson(db: Session, learner: User, course_id: int, lesson_id: int) 
     # deadlock. The course lock is shared: completions don't block each other, but an archive or a lesson
     # removal (which lock the course FOR UPDATE) waits for them, and they wait for it.
     course = course_service.lock_course_for_share(db, course_id)
-    if not course_service.can_see(learner, course):
+    if not course_service.can_see(db, learner, course):
         raise NotFound("Course not found.")
     enrollment = db.scalar(
         select(Enrollment).where(Enrollment.course_id == course.id, Enrollment.user_id == learner.id).with_for_update()
@@ -64,6 +67,9 @@ def complete_lesson(db: Session, learner: User, course_id: int, lesson_id: int) 
     lesson = db.get(Lesson, lesson_id)
     if lesson is None or lesson.course_id != course.id:
         raise NotFound("Lesson not found in this course.")
+    # Enrolled learners can still open an archived course and read it, but their progress there is frozen.
+    if course.status == CourseStatus.ARCHIVED:
+        raise Conflict("This course is archived, so you can't complete lessons in it any more.")
 
     if lesson.id not in _completed_lesson_ids(db, enrollment):
         now = datetime.now(timezone.utc)
@@ -96,6 +102,57 @@ def list_my_courses(db: Session, learner: User) -> list[EnrollmentOut]:
     Archived courses stay in the list; their status shows that they're archived."""
     require_learner(learner)
     return _enrollments_with_progress(db, Enrollment.user_id == learner.id)
+
+
+def view_course(db: Session, viewer: User, course_id: int) -> CourseOut:
+    """A course page as the viewer may see it. Instructors see everything. A learner who isn't enrolled sees
+    the title, description and lesson titles but not the lessons' content; an enrolled learner sees the
+    content too, plus their own progress. Who may open the course at all is course_service.can_see."""
+    course = course_service.get_course(db, viewer, course_id)
+    page = CourseOut.model_validate(course)
+    if viewer.role == Role.INSTRUCTOR:
+        return page
+    enrollment = course_service.find_enrollment(db, course.id, viewer.id)
+    if enrollment is None:
+        _hide_lesson_content(page)
+    else:
+        page.my_progress = _progress(db, enrollment)
+    return page
+
+
+def course_progress(db: Session, viewer: User, course_id: int) -> list[LearnerProgressOut]:
+    """Every learner enrolled in the course with their progress, ordered by name. Instructors only."""
+    require_instructor(viewer)  # before the lookup, so a learner gets 403 even for a course that doesn't exist
+    course = course_service.get_course(db, viewer, course_id)
+    lessons_total = _lessons_total(db, course.id)
+    lessons_done = (
+        select(func.count(LessonCompletion.id)).where(LessonCompletion.enrollment_id == Enrollment.id).scalar_subquery()
+    )
+    rows = db.execute(
+        select(Enrollment, User, lessons_done)
+        .join(User, User.id == Enrollment.user_id)
+        .where(Enrollment.course_id == course.id)
+        .order_by(User.full_name, User.id)
+    ).all()
+    return [
+        LearnerProgressOut(
+            learner=LearnerOut(id=learner.id, full_name=learner.full_name, email=learner.email),
+            status=enrollment.status,
+            lessons_done=done,
+            lessons_total=lessons_total,
+            enrolled_at=enrollment.enrolled_at,
+            started_at=enrollment.started_at,
+            completed_at=enrollment.completed_at,
+            last_activity_at=enrollment.last_activity_at,
+        )
+        for enrollment, learner, done in rows
+    ]
+
+
+def _hide_lesson_content(page: CourseOut) -> None:
+    """Before enrolling, a learner sees what the lessons are called but not what's in them."""
+    for lesson in page.lessons:
+        lesson.content = None
 
 
 def _move(enrollment: Enrollment, to_status: EnrollmentStatus, now: datetime) -> None:
