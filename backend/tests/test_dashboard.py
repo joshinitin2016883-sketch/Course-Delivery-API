@@ -13,9 +13,10 @@ from app.models import Course, Enrollment, Role
 
 # Zones with daylight saving, north and south of the equator, for the time zone test below.
 DST_ZONES = ["America/New_York", "Europe/London", "Australia/Sydney", "Pacific/Auckland", "America/Santiago"]
-CLOCK_CHANGES_IN_LAST_8_WEEKS = text("""
-    SELECT (now() AT TIME ZONE :zone) - (now() AT TIME ZONE 'UTC')
-        <> ((now() - interval '8 weeks') AT TIME ZONE :zone) - ((now() - interval '8 weeks') AT TIME ZONE 'UTC')
+# Whether a zone's clock changes between two moments: its offset from UTC is different at each.
+CLOCK_CHANGES_BETWEEN = text("""
+    SELECT (:first AT TIME ZONE :zone) - (:first AT TIME ZONE 'UTC')
+        <> (:last AT TIME ZONE :zone) - (:last AT TIME ZONE 'UTC')
 """)
 
 
@@ -132,19 +133,20 @@ def test_eight_weeks_of_completions_oldest_first_with_empty_weeks(client, db, ma
 
 
 def test_the_weeks_stay_on_utc_mondays_whatever_the_session_time_zone(client, db, make_user, priya, as_priya, now):
-    # Only a daylight-saving change inside the 8 weeks could push a week start off midnight UTC, and no single
-    # zone changes its clock in every 8 weeks of the year. So the test uses the first of these zones whose clock
-    # changes inside the window, and skips when none does, so it never passes without crossing a change.
+    this_monday = datetime.combine(now.date() - timedelta(days=now.weekday()), datetime.min.time(), timezone.utc)
+    mondays = [this_monday - timedelta(weeks=7 - n) for n in range(8)]
+    # Only a daylight-saving change between the first and the last Monday on the chart could push a week start
+    # off midnight UTC, and no single zone changes its clock in every 8 weeks of the year. So the test uses the
+    # first of these zones whose clock changes between those two Mondays, and skips when none does, so it never
+    # passes without crossing a change.
     zone = None
     for candidate in DST_ZONES:
-        if db.scalar(CLOCK_CHANGES_IN_LAST_8_WEEKS, {"zone": candidate}):
+        if db.scalar(CLOCK_CHANGES_BETWEEN, {"zone": candidate, "first": mondays[0], "last": mondays[-1]}):
             zone = candidate
             break
     if zone is None:
-        pytest.skip("None of the daylight-saving zones changes its clock inside the current 8-week window.")
+        pytest.skip("None of the daylight-saving zones changes its clock between the first and last Monday shown.")
     db.execute(text(f"SET LOCAL TIME ZONE '{zone}'"))  # until the test's transaction ends
-    this_monday = datetime.combine(now.date() - timedelta(days=now.weekday()), datetime.min.time(), timezone.utc)
-    mondays = [this_monday - timedelta(weeks=7 - n) for n in range(8)]
     course = add_course(db, priya, "Fire safety")
     # One completion at the very first instant of each week, in UTC: a week start that drifted would miss it.
     for person, monday in zip(learners(make_user, *[f"Learner{n}" for n in range(8)]), mondays):
