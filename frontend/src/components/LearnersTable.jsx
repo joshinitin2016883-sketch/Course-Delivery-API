@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getCourseProgress } from "../api/courses";
+import { downloadProgressCsv, getCourseProgress } from "../api/courses";
 import { formatDate } from "../format";
 import { Empty, ErrorMessage, Loading } from "./States";
 import { ProgressBadge } from "./Status";
@@ -12,6 +12,28 @@ const COLUMNS = ["Name", "Email", "State", "Lessons", "Enrolled", "Started", "Co
 export default function LearnersTable({ courseId, changes }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+
+  // The sign-in token travels in a header, which a plain link can't send. So the file is fetched like any
+  // other request, then handed to the browser to save under the filename the server chose.
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const { blob, filename } = await downloadProgressCsv(courseId);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      // Give the browser a moment to start saving before the file's temporary address is released.
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch (err) {
+      setDownloadError(err.message);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     let ignore = false; // set when a newer load starts, so an older answer can't overwrite it
@@ -80,7 +102,13 @@ export default function LearnersTable({ courseId, changes }) {
 
   return (
     <section className="space-y-4">
-      <h2 className="text-lg font-semibold">Enrolled learners</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Enrolled learners</h2>
+        <button type="button" onClick={handleDownload} disabled={downloading} className="btn-secondary">
+          {downloading ? "Downloading…" : "Download CSV"}
+        </button>
+      </div>
+      {downloadError && <ErrorMessage message={downloadError} />}
       {content}
     </section>
   );

@@ -1,5 +1,6 @@
-// Every API call goes through apiRequest. It adds the sign-in token, turns an error response into an
-// ApiError carrying the server's message, signs the user out on a 401, and reports slow requests.
+// Every API call goes through send(), by way of apiRequest (JSON) or apiDownload (files). It adds the sign-in
+// token, turns an error response into an ApiError carrying the server's message, signs the user out on a 401,
+// and reports slow requests.
 
 const API_URL = import.meta.env.VITE_API_URL;
 if (!API_URL) {
@@ -48,8 +49,10 @@ function countSlow(change) {
   onSlowChange(slowRequests > 0);
 }
 
+// Sends one request and returns the response once it has arrived and is OK. What every call needs happens here:
+// the token, the slow-request banner, signing out on a 401, and turning an error response into ApiError.
 // signOutOn401 is false only for the login call, where a 401 means a wrong password, not an old token.
-export async function apiRequest(path, { method = "GET", body, signOutOn401 = true } = {}) {
+async function send(path, { method = "GET", body, signOutOn401 = true } = {}) {
   const headers = {};
   const token = getToken();
   if (token) {
@@ -90,12 +93,26 @@ export async function apiRequest(path, { method = "GET", body, signOutOn401 = tr
   if (!response.ok) {
     throw new ApiError(response.status, await readErrorMessage(response));
   }
+  return response;
+}
 
+// For the API's JSON answers.
+export async function apiRequest(path, options) {
+  const response = await send(path, options);
   // 204 No Content (removing a lesson) has no body to read.
   if (response.status === 204) {
     return null;
   }
   return response.json();
+}
+
+// For a file the API sends, such as the progress CSV: its contents, and the filename the server chose. The
+// filename comes from Content-Disposition, which the API exposes to other origins for exactly this.
+export async function apiDownload(path) {
+  const response = await send(path);
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "download";
+  return { blob: await response.blob(), filename };
 }
 
 // FastAPI puts the reason in "detail": a sentence for the API's own errors,

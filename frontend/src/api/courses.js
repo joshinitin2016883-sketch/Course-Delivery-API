@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiDownload, apiRequest } from "./client";
 
 // The same three categories as the API (backend/app/models/course.py), for the filter and the forms.
 export const CATEGORIES = [
@@ -84,6 +84,11 @@ export function bulkEnroll(courseId, text) {
 // Every learner enrolled in the course, by name, with their progress. Instructors only (403 for anyone else).
 export function getCourseProgress(courseId) {
   return apiRequest(`/courses/${courseId}/progress`);
+}
+
+// The same learners as getCourseProgress, as a CSV file: { blob, filename }. Instructors only.
+export function downloadProgressCsv(courseId) {
+  return apiDownload(`/courses/${courseId}/progress.csv`);
 }
 
 // Every course the learner is enrolled in, newest enrolment first, with their progress in each.
