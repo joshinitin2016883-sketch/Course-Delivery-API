@@ -1,5 +1,6 @@
 """All table models. Importing this package registers every table on Base.metadata, which Alembic reads."""
 from app.models.activity_log import Action, ActivityLog
+from app.models.alert_dismissal import AlertDismissal
 from app.models.base import Base
 from app.models.course import Category, Course, CourseStatus
 from app.models.enrollment import Enrollment, EnrollmentStatus
@@ -10,6 +11,7 @@ from app.models.user import Role, User
 __all__ = [
     "Action",
     "ActivityLog",
+    "AlertDismissal",
     "Base",
     "Category",
     "Course",
