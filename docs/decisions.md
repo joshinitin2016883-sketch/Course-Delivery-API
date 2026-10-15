@@ -69,6 +69,7 @@
 - **Chose:** Instructors can reorder all the lessons in a course with a single request. The server checks that the list contains exactly the lessons belonging to that course, updates their positions in one transaction, and records one activity log entry.
 - **Rejected:** Sending a separate request to move each lesson up or down.
 - **Why:** Moving a lesson across a long list would require multiple requests and create unnecessary log entries. A single request supports both drag-and-drop and up/down buttons. If the course changes before the reorder is submitted, the server returns a 409 error instead of guessing the correct order.
+- **Updated in step 7:** The page reorders with up/down buttons and sends the new order once, on Save order (Decision 34). A 409 for an outdated order is shown with a Reload button.
 
 ## Decision 12: Removing lessons
 
@@ -180,6 +181,7 @@
 - **Chose:** Each page hides what the signed-in person can't use: Enrol and My courses for instructors, the status filter for learners, and Mark complete before enrolling or on an archived course. The API still enforces every one of these rules, and when it refuses, the page shows the server's own message.
 - **Rejected:** Showing every button and letting the server refuse, and treating the hidden buttons as the protection.
 - **Why:** Hiding what you can't use keeps each page clear. But anyone can call the API without the page, so the page can't be where the rules live. An instructor who enrols anyway gets a 403, completing a lesson before enrolling gets a 403, completing one in an archived course gets a 409, and a learner is never sent a draft. A page that's out of date, say a course archived while it's open, still ends with a clear answer: the server refuses, and the page shows why.
+- **Updated in step 7:** The same goes for the instructor tools. The manage section, the lesson tools, the learners table, New course and Courses I created are shown to instructors only, and the comment box only to people who can join the discussion. Inputs carry the API's length limits as maxLength, which only stops typing past them; the server still checks every value.
 
 ## Decision 30: Listing instructors for the filter
 
@@ -193,3 +195,51 @@
 - **Rejected:** An undo button, and a "mark incomplete" action.
 - **Why:** Goal 4 allows only Not Started → In Progress → Completed and says the server rejects any other move. Undoing would also rewrite the completions the dashboard counts (completions this month, and the eight-week chart), and break the inactivity alerts, which depend on when a learner last made progress. Learners lose nothing: a completed lesson's content stays visible, so they can re-read it whenever they like.
 - **Possible future improvement (not built):** A personal "Revisit later" checklist: a checkbox per lesson, like a Markdown task list, that the learner can tick and untick freely. It would be private to the learner, separate from Mark complete, and would never change progress, so it breaks no rule. It would need to look clearly different from the official "Done" badge, so nobody thinks Mark complete can be unticked.
+
+## Decision 32: Instructor tools on the course page
+
+- **Chose:** The instructor's tools are sections of the existing course page, shown by role: managing the course, its lessons, the enrolled learners, and the activity feed. Creating a course has its own small page, `/courses/new`.
+- **Rejected:** Separate `/manage` routes for instructors.
+- **Why:** One address per course works for both roles, so every link (the course list, My courses) leads to the same page. Instructors see what learners see, plus their tools, and the feed is written once. Showing the sections by role is presentation (Decision 29): the API refuses every one of these tools to learners.
+
+## Decision 33: "Courses I created" is a filter, not ownership
+
+- **Chose:** Instructors have "Courses I created" in the nav: the course list filtered to `instructor_id` = their id, in the URL like every other filter. It uses the existing `GET /courses`.
+- **Rejected:** Calling it "My teaching", and a separate endpoint or flag for an instructor's own courses.
+- **Why:** `instructor_id` only records who created a course, and any instructor can manage any course (Decision 3). "My teaching" would suggest the other courses aren't theirs to manage. As a filter, the view can be bookmarked and combines with the search and the other filters.
+
+## Decision 34: Reordering lessons with up/down buttons
+
+- **Chose:** Each lesson has ↑ and ↓ buttons. Moves only change the page until Save order sends the whole order in one request, which writes one log entry; Cancel puts the saved order back. Editing, removing and adding wait until the new order is saved or cancelled.
+- **Rejected:** Drag and drop, either native or with a library, and saving after every click.
+- **Why:** Buttons work with the keyboard and screen readers as they are ("Move "Getting started" up"), and a test only has to click them. Native drag and drop has no keyboard support and is unreliable on touch screens; a library such as dnd-kit would fix that at the cost of a dependency to explain. Saving after every click would write a log entry per click, which Decision 11 set out to avoid. Drag and drop could be added later on top of the same request.
+
+## Decision 35: Asking before removing a lesson or archiving
+
+- **Chose:** Remove lesson and Archive ask once more on the page itself, for example "Remove lesson 2, "Going further"? This can't be undone." with Remove and Cancel, through one shared ConfirmButton. Cancel takes the focus. Publish and Restore act straight away.
+- **Rejected:** No confirmation, and the browser's `confirm()` dialog.
+- **Why:** Removing a lesson deletes it for good (Decision 12), and archiving takes a course out of the catalogue and freezes learners' progress, so a mis-click costs something. `confirm()` is unstyled, browsers let people switch such dialogs off, and tests have to handle a dialog; a step on the page is just plain buttons. Restore undoes an archive, and Publish is the expected next step for a finished draft, so asking first there would only slow people down.
+
+## Decision 36: Only the allowed move, and every refusal shown
+
+- **Chose:** The manage section offers only the move allowed from the current status: Publish on a draft, Archive on a published course, Restore on an archived one. A button the server might still refuse stays visible, so its reason can show. That covers Publish on a draft with no lessons, and Remove on the last lesson of a published course or on a lesson learners have completed. An archived course hides its editing and lesson tools behind a note: "This course is archived and read-only. Restore it to make changes."
+- **Rejected:** Showing all three moves all the time, and hiding or disabling a button whenever the page guesses the server would refuse.
+- **Why:** A move that's never allowed from the current status only invites a refusal. But the brief wants the server's explanation when someone tries to publish an empty course. And the page can't always know what the server will say, because another instructor may have archived or published the course since it loaded. So the page offers what's possible, the server decides, and its message is shown whenever it refuses (Decisions 5 and 29).
+
+## Decision 37: Reading the course again after each change
+
+- **Chose:** After an instructor changes the lessons, the page asks the server for the course again instead of patching its own copy. Status moves and detail edits use the course the server sends back. The lesson list then starts afresh from what was saved, and the learners table and the feed reload too.
+- **Rejected:** Updating the page's copy from each response.
+- **Why:** Some changes have effects the page can't see. Removing a lesson renumbers the others, and adding or removing one changes every learner's "X of Y" (Decision 16). Asking again costs one small request per change and guarantees the page shows what was saved.
+
+## Decision 38: Two instructors editing at once
+
+- **Chose:** Course details and lessons are last write wins, and both edits stay in the activity log. A reorder based on an outdated list of lessons is refused with a 409, shown with a Reload button.
+- **Rejected:** Version numbers on courses and lessons, to refuse any edit made from out-of-date data.
+- **Why:** Any instructor can manage any course (Decision 3), but two of them editing the same course at the same moment is rare, and the log records both edits, so nothing is lost without trace. A reorder is different: it lists every lesson, so an outdated list would drop or repeat lessons, and the server refuses it (Decision 11). Version numbers would mean more code and a conflict screen on every form, the trade Decision 7 already turned down.
+
+## Decision 39: How the activity feed reads
+
+- **Chose:** Each entry says who, what in plain words, and when in the viewer's local time: "Priya Shah changed the title from "Old" to "New"", "added lesson 3, "Getting started"", "published the course". Long texts, such as a description or a lesson's content, are named rather than quoted, and a reorder just says "reordered the lessons". Comments show their text as plain text, with an "Instructor" label on instructors' comments. The feed loads 20 entries at a time with "Load older" (Decision 9) and reloads its newest page after every change made on the page.
+- **Rejected:** Quoting old and new text in full, naming the new lesson order, and relative times such as "2 hours ago".
+- **Why:** Plain sentences make the history readable. A 5,000-character description quoted twice would bury everything else. For a reorder the log keeps only lesson ids, and lessons removed since then couldn't be named. A relative time needs a timer to stay true, while a local date and time is exact and needs nothing. Learners only get comments (Decision 8), and a learner who isn't enrolled sees "Enrol to join the discussion" instead of the box (Decision 20).
