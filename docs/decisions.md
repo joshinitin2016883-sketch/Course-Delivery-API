@@ -296,7 +296,7 @@
 
 - **Chose:** The dashboard and the alerts measure time with the database's `now()`, in every query. Inside one request it's the start of the transaction, so it doesn't move.
 - **Rejected:** The API server's clock (`datetime.now()`) for these queries, and mocking the clock in tests.
-- **Why:** With one clock that stands still for the request, the dashboard's numbers agree with each other, and the alerts use the same clock. Tests gain the same way: inside a test's transaction `now()` is fixed, so a test can place a row exactly 14 days before it, with no clock mocking. Lesson completions are still stamped with the API's own clock (step 4). The two machines' clocks may differ slightly, which can't matter for rules counted in days, weeks and months.
+- **Why:** With one clock that stands still for the request, the dashboard's numbers agree with each other, and the alerts use the same clock. Tests gain the same way: inside a test's transaction `now()` is fixed, so a test can place a row exactly 14 days before it, with no clock mocking. `complete_lesson` stamps the completion and the enrolment's times with the API server's clock, in one value, so they always agree; the dashboard and alerts compare those times with the database's `now()`. The two machines' clocks may differ slightly, which can't matter for rules counted in days, weeks and months.
 
 ## Decision 48: Weeks and months in UTC, whatever the session's time zone
 
