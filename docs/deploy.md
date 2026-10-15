@@ -47,9 +47,19 @@ the command line, keeps it out of your shell history.
 $env:DATABASE_URL = [System.Net.NetworkCredential]::new("", (Read-Host "Neon direct connection string" -AsSecureString)).Password
 $env:SEED_PASSWORD = [System.Net.NetworkCredential]::new("", (Read-Host "Demo password" -AsSecureString)).Password
 python -m alembic upgrade head
-python -m app.seed
+python -m app.seed --demo
 Remove-Item Env:DATABASE_URL, Env:SEED_PASSWORD
 ```
+
+`--demo` adds the demo data after the 7 accounts: 20 more learners, 7 courses (one draft, one archived),
+enrolments in every state, completions over the last 8 weeks, 4 inactivity alerts plus one already dismissed,
+and a few comments. The new learners share the same password. It only adds data to a database with no courses,
+and never deletes anything; on a database that already has courses it says so and adds nothing. Without
+`--demo`, only the accounts are created.
+
+Every demo time is relative to the moment the seed runs, so the numbers drift: completions slide out of the
+8-week chart and more learners go quiet. Before a demo or the final submission, reset Neon (below) and
+seed again.
 
 Variables set like this win over `backend/.env` for that PowerShell window only, so your local Docker
 database isn't touched. The tests never use `DATABASE_URL`: they always run against `TEST_DATABASE_URL`.

@@ -27,7 +27,8 @@ py -3.12 -m venv .venv
 python -m pip install -r requirements.txt
 
 python -m alembic upgrade head             # create the tables
-python -m app.seed                         # demo accounts; their password is SEED_PASSWORD from .env
+python -m app.seed --demo                  # demo accounts (password: SEED_PASSWORD from .env) and demo data;
+                                           # without --demo, only the accounts
 python -m uvicorn app.main:app --reload    # API on http://localhost:8000, interactive docs at /docs
 
 python -m pytest                           # tests; they only ever use the test database
