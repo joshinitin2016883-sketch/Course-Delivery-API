@@ -877,3 +877,356 @@ Keep it short and readable, with one small table per database table. Leave a lin
 ### What I got
 
 A draft of all five answers. I had it checked line by line against the five migrations before saving: every column, type, constraint and index matched. For question 4 it didn't write "nothing denormalised"; it named the log copying titles and old values, and the enrolment's start and last-activity times, and explained why neither can drift.
+
+
+## 15. Step 7: the instructor screens
+
+### Prompts
+
+<details>
+<summary>The instructor step</summary>
+
+```text
+Step 7: the instructor UI, plus comments for both roles. The backend already has every endpoint this needs; use them as they are. If you find a real gap, stop and tell me before changing any backend code.
+
+Brief rules this step must show (goals 1, 2, 3, 4, 9):
+- Instructors create, edit, publish, archive and restore courses; add, edit, reorder and remove lessons.
+- "Publishing is blocked unless the course already has at least one lesson ... with a message explaining why."
+- Archived courses are read-only, a published course keeps at least one lesson, and a lesson any learner has completed can't be removed (Decision 15).
+- The activity log shows "when it was created, every edit, every publish or archive transition and who made it, and any comments learners or the instructor leave". Learners see comments only (Decision 8); enrolled learners can comment, including on archived courses (Decisions 17, 20).
+- Any instructor can manage any course (Decision 3).
+
+What to build:
+1. "My teaching" in the instructor's nav: the course list filtered to their own courses (instructor_id in the URL), plus a "New course" button (title, description, category; it starts as a draft).
+2. On the course page, for instructors: edit the course details; add, edit, reorder and remove lessons; Publish / Archive / Restore buttons that show only the moves allowed from the current status. Every refusal shows the server's message (empty course, last lesson, completed lesson, archived course).
+3. On the course page, for instructors: an "Enrolled learners" table from GET /courses/{id}/progress: name, email, state, X of Y lessons, enrolled, started, completed and last activity dates, with an empty state.
+4. On the course page, for everyone who may see it: the activity feed (newest first, "Load older" using ?before) and a comment box. Instructors see every entry with who made it; learners see comments only; a learner who can see the course but isn't enrolled sees "Enrol to join the discussion" instead of the box.
+
+Before any code, give me options and trade-offs, then wait for my choices, on:
+a. Where instructor tools live: sections on the existing course page by role, or separate /manage routes.
+b. Lesson reordering UI: up/down buttons versus drag and drop (keyboard access and how each is tested).
+c. Confirmation before Remove lesson and Archive: none, a browser confirm(), or an in-page confirm step.
+d. How the feed shows each kind of entry (created, edited, status change, lesson changes, comment) in plain words.
+e. Anything in this list you think is wrong, missing, or too much for one step.
+
+Then the plan, split into commits that each work on their own; stop after each with Summary, Description and file list, and wait for "committed".
+Testing, lighter than step 6 to save time: browser checks against a local API for both roles, and mutation checks only for the key rules (role differences, refusals shown, allowed moves only). The backend suite must still pass. Only stop processes on your own ports.
+At the end, draft the decisions for this step and show them before saving.
+Not in this step: bulk enrolment, the CSV export, the dashboard, inactivity alerts.
+Don't run git commit or push. Start with the options, then wait.
+```
+
+</details>
+
+<details>
+<summary>My choices</summary>
+
+```text
+a: sections on the existing course page, plus /courses/new.
+b: up/down with Save order / Cancel (one request, one log entry).
+c: the in-page confirm step for Remove lesson and Archive, via a shared ConfirmButton.
+d: your wording as proposed, with local dates and times.
+e: yes to all: keep Publish visible on an empty draft and Remove on the last or completed lesson so the server's refusal shows; hide editing tools on archived courses with the read-only note; reload the feed after each change; last-write-wins for course edits with the 409 + Reload for a stale reorder; maxLength on inputs. Name the nav link "Courses I created" instead of "My teaching".
+Five commits as you listed, starting with the client 204 fix. Show the plan with file lists, then go.
+```
+
+</details>
+
+<details>
+<summary>The decisions</summary>
+
+```text
+Draft the step 7 decisions. Keep them short: only choices a reviewer could question (the in-page confirm instead of a dialog, Save order as one request, Publish left on an empty draft so the server's reason shows, reloading from the server after each change, the 20-entry feed page, "Enrol to join the discussion"). Also note the phone-width bug the browser checks caught.
+```
+
+</details>
+
+### What I got
+
+Five commits: "Courses I created" and New course, course editing and status moves, lesson management, the enrolled learners table, and the activity feed with comments. All 72 browser checks passed by the end, and each key rule was broken on purpose to prove its check failed. Then Decisions 32 to 39.
+
+### What I corrected
+
+- **The nav label.** I had asked for "My teaching". The agent pointed out that any instructor can manage any course (Decision 3), so the label suggests ownership that doesn't exist. I changed it to "Courses I created" (Decision 33).
+- **Hiding buttons the server might refuse.** I agreed with the agent to keep Publish visible on an empty draft, and Remove on a completed lesson. The brief wants the server's explanation shown, and hiding the button would hide it (Decision 36).
+
+### What the AI caught
+
+- **A real layout bug.** At phone width the whole page scrolled sideways (727 pixels wide instead of 375). A hidden "Not yet" label for screen readers escaped the table's scroll box. Making the box `relative` fixed it, and the phone-width check now passes.
+- **Two out-of-date checks.** Step 6's browser checks expected instructors to have no buttons on lessons. Step 7 changed that on purpose, so the agent updated those checks rather than the code.
+
+## 16. Step 8: bulk enrolment and the progress CSV
+
+### Prompts
+
+<details>
+<summary>The bulk enrolment step</summary>
+
+```text
+Step 8: bulk enrolment and the progress CSV (goal 7). Read goal 7 in docs/brief.md and Decisions 3, 18, 20, 22 and 29 first.
+
+Before writing code, reply with a short plan: endpoints, the result shape, the commits, and the tests. Wait for my OK. My recommendations are below. Say where you disagree and why; don't just accept them.
+
+Bulk enrolment (backend)
+- POST /courses/{id}/enrollments/bulk, instructors only (403 for learners; role checked before the lookup, as everywhere else). Body: {"text": "<pasted text>"}. The server does all the parsing, so pasting and uploading use the same code and the same tests. Split on commas, semicolons, whitespace and newlines. Normalise like users.email (trim, lower-case). Remove repeats but keep the first-seen order.
+- The course must be published (Decision 18): a draft or archived course gets a 409 for the whole request, with a message.
+- The result has one row per distinct address, in input order, plus counts per outcome. Goal 7 requires three outcomes: enrolled (new), already_enrolled, unknown (no account). Two more, which I think belong as separate outcomes rather than being folded into "unknown": invalid (not an email address at all) and not_a_learner (the account is an instructor). Report how many repeats were removed.
+- One transaction. Take the same shared lock on the course as self-enrolment. Insert with ON CONFLICT DO NOTHING ... RETURNING, so a learner who enrols themselves at the same moment ends up as already_enrolled, not a 500. The unique constraint stays the "already enrolled" check, as in Decision 18.
+- Limits: at most 500 distinct addresses and a capped text length. Over the limit gets a 422 with a message. Empty input gets a 422.
+- Activity log: Decision 22 keeps enrolments out of the log. Tell me if you think a bulk enrolment by an instructor should be the exception (one entry: who, how many). Recommend one, and I'll decide.
+
+Progress CSV (backend)
+- GET /courses/{id}/progress.csv, instructors only, with the same rows and order as GET /courses/{id}/progress. Reuse that query; don't write a second one.
+- Columns: name, email, status, lessons_done, lessons_total, enrolled_at, started_at, completed_at, last_activity_at. Times in ISO 8601 UTC; empty when not yet.
+- Use Python's csv module, UTF-8, Content-Type text/csv, and Content-Disposition attachment with a filename like course-<id>-progress-<YYYY-MM-DD>.csv.
+- Guard against formula injection: a cell that starts with = + - @ (or a tab or carriage return) gets a leading apostrophe, because names are typed by users and the file will be opened in Excel. Add a test with a learner named "=HYPERLINK(...)".
+- Archived and draft courses can still be exported (history isn't deleted).
+
+Frontend (course page, instructors only, shown by role as in Decision 29)
+- An "Enrol learners" section near Enrolled learners: a textarea for pasting, plus a file input (.csv, .txt) that reads the file in the browser and puts its text in the textarea, so the person sees what will be sent. Hide it on draft and archived courses, with a one-line note saying why.
+- After submitting: the counts, and a table of address → outcome in plain words. Show the server's message on a 409 or 422. The Enrolled learners table and the feed reload (reuse the `changes` count).
+- A "Download CSV" button on the Enrolled learners section. Auth is a bearer token, so fetch with the token, turn the response into a blob and download it with the server's filename. A plain link won't carry the token.
+
+Commits, each working on its own; stop after each with Summary, Description and file list:
+1. Backend bulk enrolment + tests
+2. Backend CSV export + tests
+3. Frontend bulk enrolment
+4. Frontend CSV download
+Then the decision drafts; show them before saving.
+
+Tests
+- pytest: every outcome in one request (new, already enrolled, unknown, invalid, not a learner, repeats, mixed case and spaces); a draft and an archived course give 409; a learner gets 403 on both endpoints; over-limit and empty input give 422; the CSV's header, rows, order, empty dates and the formula escaping.
+- Mutation checks for the key rules only: learners refused, the published-only rule, ON CONFLICT (a self-enrolled learner reported as already_enrolled), and the formula escaping.
+- Browser checks as in step 7, lighter: paste, upload, the results table, a refusal shown, the download. The backend suite must still pass.
+
+Same rules as before: never run git commit or push; secrets only from environment variables; only stop processes on your own ports (5175, 8001). Time matters: I'm past my 12-hour budget, so keep it tight.
+```
+
+</details>
+
+<details>
+<summary>Approving the plan</summary>
+
+```text
+OK, go. No log entry: agreed, keep Decision 22 and rely on enrolled_by.
+Two small things: keep the shared (FOR SHARE) lock on the course as in self-enrolment, and use the UTC date in the CSV filename.
+Start commit 1.
+```
+
+</details>
+
+<details>
+<summary>The byte-order mark, as its own commit</summary>
+
+```text
+Committed and pushed. Before commit 3, one small separate commit: write the CSV as UTF-8 with a byte-order mark so Excel on Windows reads non-ASCII names correctly. Add a test that the body starts with the BOM and that a name like "José Núñez" round-trips (read it back with utf-8-sig). Re-run the suite, then give me Summary, Description and files for this commit only, and wait for "committed".
+```
+
+</details>
+
+<details>
+<summary>A limitation for the decisions</summary>
+
+```text
+Committed and pushed. Start commit 4. For the step 8 decisions later, also note one known limitation: quoted addresses in a CSV ("a@b.com") come back as invalid, because the server doesn't strip quotes.
+```
+
+</details>
+
+### What I got
+
+Five commits: the bulk enrolment endpoint, the CSV export, the byte-order mark, the bulk enrolment screen and the CSV download. Then Decisions 40 to 45. The agent agreed with most of my plan, and said where it differed and why.
+
+### What I corrected
+
+- **The byte-order mark.** The agent wrote UTF-8 without one, as I had specified, and asked if I wanted one. Excel on Windows misreads a name like "José" in a CSV without it, and Excel is what the people using this export would open it in. I committed the export first and added the mark as its own small commit.
+- **Quoted addresses.** Reviewing the upload, I noticed that a CSV with quotes around an address would come back as "Not an email address". Excel doesn't quote plain addresses, so I recorded it as a known limitation (Decision 40) rather than adding code.
+
+### What the AI caught
+
+- **CORS hides the filename.** A browser can't read `Content-Disposition` from another origin unless the API exposes it. My plan missed that; without it, every download would have been unnamed (Decision 45).
+- **No "already enrolled" check at all.** I asked for ON CONFLICT to handle a race. The agent went further: with no check before the insert, there is no gap for the race to fall into. Removing ON CONFLICT then fails the ordinary test where a learner had enrolled themselves (Decision 42).
+
+### My own mistakes
+
+- I committed the CSV export before asking for the byte-order mark, so the agent's "same 4 files" no longer applied. I made the mark its own commit with a new description instead of amending.
+
+## 17. Step 9: the dashboard, inactivity alerts and demo data
+
+### Prompts
+
+<details>
+<summary>The dashboard and alerts step</summary>
+
+```text
+Step 9: the dashboard (goal 8), inactivity alerts (goal 10) and the demo data. Read goals 8 and 10 in docs/brief.md, the "Seeded with enough demo data" line under submission, and Decisions 3, 14, 16, 17 and 22 first.
+
+Before writing code, reply with a short plan: endpoints, the migration, the commits, the tests. Wait for my OK. My recommendations are below. Say where you disagree and why.
+
+Inactivity alerts (backend)
+- An alert is an enrolment with status in_progress, on a published course, whose last_activity_at is more than 14 days ago ("more than": exactly 14 days is not an alert). It's computed on read from enrollments, with no background job. Exclude archived courses, because learners can't progress there (Decision 17). Not-started and completed enrolments never alert; goal 10 says In Progress only.
+- Dismissals: a new table (migration 0006), alert_dismissals(course_id, user_id, quiet_since, dismissed_by, dismissed_at). quiet_since is a copy of the enrolment's last_activity_at at the moment of dismissal, unique on (course_id, user_id, quiet_since). An alert is hidden only while a dismissal exists whose quiet_since equals the current last_activity_at. If the learner completes another lesson, last_activity_at changes, the old dismissal stops matching, and when they go quiet for 14 days again the alert comes back. That's goal 10's reappear rule, with nothing deleted. Past dismissals stay as history.
+- Any instructor sees and dismisses every alert (Decision 3). A dismissal hides the alert for all instructors and records who dismissed it.
+- GET /alerts: instructors only. One row per alert: learner (name, email), course (id, title), last_activity_at, days quiet. Most-quiet first.
+- GET /alerts/count for the nav badge (or include the count in GET /alerts, your call).
+- POST /alerts/dismiss {course_id, learner_id}: instructors only. If there's no current alert for that pair (the learner came back meanwhile, or it's already dismissed), return a 409 with a message rather than storing a dismissal that matches nothing.
+- Dismissals aren't course activity, so they don't go in the activity log (consistent with Decision 22). dismissed_by and dismissed_at record them.
+
+Dashboard (backend)
+- GET /dashboard, instructors only, computed with SQL aggregates on the server. Headline numbers:
+  - total learners: every learner account (say so on screen);
+  - published courses;
+  - completions this month: enrolments with completed_at in the current calendar month, in UTC (label it "UTC" on screen);
+  - learners currently in progress: distinct learners with at least one in_progress enrolment, not the number of enrolments.
+- Breakdown: one row per course that has enrolments, with its status and counts of not_started, in_progress and completed.
+- Completions over the last 8 weeks: weekly buckets starting Monday (UTC), oldest first, including weeks with 0 (generate_series), and the current week marked as partial.
+
+Frontend
+- The dashboard is the instructor's landing page after sign-in, with "Dashboard" in the nav. Learners still land on the course list.
+  - Headline tiles.
+  - The breakdown table, where each course links to its page.
+  - The 8-week chart as plain SVG bars with no chart library, with a text or table version for screen readers.
+- An "Alerts" page with a count badge in the nav for instructors.
+  - The badge loads on navigation and after a dismiss, with no polling.
+  - Each row has the learner, the course (linked), "quiet for N days" and Dismiss.
+  - Dismiss needs no confirm step, because it's reversible: the alert comes back if the learner goes quiet again.
+  - Show the server's 409 if the alert has gone meanwhile.
+
+Demo data
+- Extend app.seed with a demo mode that creates realistic data. It runs only when no courses exist, refusing otherwise, and never deletes anything. I'll reset Neon myself before the final seed.
+  - About 20 more learners.
+  - 6–8 courses across categories: published, one draft, one archived, each with lessons.
+  - Enrolments in every state.
+  - Completions spread over the last 8 weeks, so the chart has a shape.
+  - About 4 learners quiet for more than 14 days, so there are alerts, plus one alert already dismissed.
+  - A few comments, so the feeds aren't empty.
+- All times are relative to when the seed runs.
+- Write through the same rules as the app (or the services where practical). Set past timestamps on insert only: the activity log is append-only, and its trigger blocks updates.
+- Keep the 7 existing accounts and their password from SEED_PASSWORD.
+- Note in the plan: the numbers drift with time (completions this month can show 0 next month), so I'll re-seed just before submitting.
+
+Commits, each working on its own; stop after each with Summary, Description and file list:
+1. Backend dashboard + tests
+2. Backend alerts: migration 0006, endpoints, tests
+3. Frontend dashboard
+4. Frontend alerts page and nav badge
+5. Demo seed
+Then the decision drafts; show them before saving.
+
+Tests
+- pytest:
+  - The 14-day boundary: exactly 14 days is no alert, 14 days plus a minute is an alert.
+  - The reappear rule: dismiss, then complete a lesson, then backdate to 15 days, and it alerts again.
+  - Dismissing with no current alert gives 409.
+  - Archived courses, completed and not-started enrolments don't alert.
+  - Learners get 403 on every new endpoint.
+  - The dashboard: each headline number, the month boundary, the 8 weeks including empty ones, and distinct learners in progress.
+  - Backdate times in the database rather than mocking the clock, and say which clock (the database's now()) the queries use.
+- Mutation checks for the key rules only: the 14-day boundary (> vs >=), the reappear rule, the archived exclusion, and the role checks.
+- Browser checks, light: the dashboard numbers match the API, the badge count, Dismiss removes a row and lowers the badge, and learners see neither page.
+
+Same rules: never commit or push; secrets only from environment variables; never connect to Neon (I run the seed there myself); only stop processes on your own ports (5175, 8001). I'm well past my time budget, so keep tests focused and the UI plain.
+```
+
+</details>
+
+<details>
+<summary>Approving the plan</summary>
+
+```text
+OK, go. Point 4: yes, exclude archived courses from learners_in_progress, and say so on screen.
+One addition for the demo seed: since it inserts rows directly, keep them consistent the way the services would: in_progress learners have some but not all lessons completed, last_activity_at equals their latest completion's time, completed learners have every lesson completed with completed_at equal to the last one, and not_started learners have none. Add that to test_demo_seed.py as one consistency check across every enrolment.
+Start commit 1.
+```
+
+</details>
+
+<details>
+<summary>The weekly chart's time zone</summary>
+
+```text
+One small fix before I commit: give the generate_series in WEEKS_SQL the time zone as its 4th argument, generate_series(..., interval '1 week', 'UTC'), so the weekly step is in UTC whatever the session's time zone is. That needs Postgres 16 or later: confirm the local server's version with SELECT version(), and tell me how to check Neon's version myself (you can't connect to Neon). Add a test that sets the session to a time zone with daylight saving (SET LOCAL TIME ZONE 'America/New_York') and checks the 8 weeks still line up and count correctly. Re-run the suite, then give me the updated Description. Same 5 files.
+```
+
+</details>
+
+<details>
+<summary>A test that must not pass without testing</summary>
+
+```text
+Good catch on the second bug. One small change to the new test: if none of the five zones changes its clock inside the current 8-week window (that happens roughly April to early September), call pytest.skip with that reason instead of falling back to New York, so the test never passes without exercising a clock change. Re-run the dashboard tests. No other changes; same 5 files and the same Description.
+```
+
+</details>
+
+<details>
+<summary>The decisions</summary>
+
+```text
+Committed and pushed. Draft the step 9 decisions and the docs/schema.md section for alert_dismissals, and show me before saving. Include the two time-zone bugs the dashboard test found (date_subtract and the generate_series step) and why the alert rule is written as now() - last_activity_at.
+```
+
+</details>
+
+### What I got
+
+Five commits: the dashboard endpoint, the alerts endpoints with migration 0006, the dashboard page, the alerts page with its nav badge, and the demo seed. Then a fix to the daylight-saving test, Decisions 46 to 53, and the alert_dismissals section of schema.md.
+
+### What I corrected
+
+- **The weekly chart's step.** Reviewing the SQL, I saw `generate_series` stepping a week at a time in the session's time zone. My machine and Neon both run in UTC, so no test could see it. I asked for UTC as its fourth argument and a test under a daylight-saving time zone.
+- **A test that could pass without testing.** The new test fell back to New York when no listed zone changed its clock. From April to early September that would pass without crossing a clock change, so I asked it to skip and say why instead.
+- **The demo seed's rows.** The seed inserts rows directly, with past times, so I asked for one test that checks every enrolment is what the services would have left (Decision 53).
+
+### What the AI caught
+
+- **A second time-zone bug.** With my fix in, the new test still failed. Finding the first week also subtracted in the session's time zone: under Sydney time the chart lost a week. The fix was `date_subtract(..., 'UTC')` (Decision 48).
+- **A gap in my skip fix.** The test compared clocks now and 8 weeks ago, but the chart runs from the Monday 7 weeks back to this Monday. Checking every day of 2026, the agent found 30 days where the test would still pass with both bugs back. It now compares the chart's own first and last Mondays.
+- **Dismissals tied to the enrolment.** I proposed (course_id, user_id); the agent suggested a foreign key to the enrolment, so the database guarantees a dismissal belongs to a real one (Decision 51).
+
+### My own mistakes
+
+- I committed the dashboard page but didn't push it. I only noticed when checking GitHub before the next commit.
+- The agent's file list for the alerts commit left out its own test file. I caught it before committing and added it.
+
+## 18. Step 10: the architecture doc and the final seed
+
+### Prompts
+
+<details>
+<summary>The architecture doc</summary>
+
+```text
+Step 10, first job: write docs/architecture.md, replacing the stub. Answer the brief's four questions from the real code and config, not from memory:
+1. The moving pieces and how they talk: the React app (Vercel), the FastAPI API (Render), Postgres (Neon); the bearer token, CORS, JSON; services raising errors that main.py maps to status codes.
+2. Where each runs, with the free-tier facts that matter: Render sleeps after 15 minutes and wakes slowly (the "waking" banner), Neon suspends when idle, migrations run in the start command (Decision 23).
+3. One representative action traced end to end with real file and function names: a learner clicking "Mark complete". Cover the click, the API client, the router, enrollment_service.complete_lesson (role check, the course lock FOR SHARE then the enrolment FOR UPDATE, the PROGRESS_MOVES table, the timestamps, commit), the response, and the page updating. Include what happens on an archived course (409) and a second click (no change).
+4. What I decided not to build, and why, pointing to the decisions: unenrolling (21), undoing a completed lesson (31), course ownership (3), refresh tokens and cookies (1), announcements (20), a background job for alerts (50), per-instructor dismissals (51), and the stretch ideas.
+Keep it about 1-2 pages, in the same plain style as the other docs, with decision numbers as references. One simple text diagram is fine. Show me the draft before saving. Only docs/architecture.md changes.
+```
+
+</details>
+
+<details>
+<summary>Two clocks in one request</summary>
+
+```text
+Before saving architecture.md, one small fix found while checking the draft: complete_lesson stamps the enrolment with datetime.now(timezone.utc), but the LessonCompletion row takes its completed_at from the database's server_default now(), so the two differ (milliseconds, plus any clock difference between Render and Neon). That makes Decision 53's claim ("last_activity_at at the latest completion") untrue in the live app.
+1. Pass completed_at=now to the LessonCompletion in complete_lesson, so the row and the enrolment share one timestamp. Add a test that after a completion, last_activity_at equals that completion's completed_at (and completed_at too when it finishes the course). Run the suite and a mutant that removes completed_at=now. Its own commit: show me Summary, Description, files, and wait for "committed".
+2. Then fix Decision 47's sentence to: "complete_lesson stamps the completion and the enrolment's times with the API server's clock, in one value, so they always agree; the dashboard and alerts compare those times with the database's now(). The two machines' clocks may differ slightly, which can't matter for rules counted in days, weeks and months."
+3. In architecture.md step 4, say the completion row and the enrolment's times share one timestamp from datetime.now(timezone.utc). Keep the rest of the draft as is, including the last line about smaller choices. Save architecture.md and the Decision 47 fix together in one docs commit.
+```
+
+</details>
+
+### What I got
+
+A draft of architecture.md written from the code, with the "Mark complete" request traced through real files and functions. Then the one-line fix with its test, and the corrected docs.
+
+### What I corrected
+
+- **Two clocks in one request.** Checking the draft's step 4 against the code, I found the completion row took the database's time while the enrolment took the API server's. Nothing could break, since the rules count days, but the docs claimed the two times matched. One line of code made them share a value, and a new test proves it.
+
+### My own mistakes
+
+- **The final seed on Neon.** My first try failed. I had put the connection string inside the PowerShell command, where the prompt's label goes, and it was the pooled one rather than the direct one. Nothing reached the database. I redid it with a plain prompt and a check that the string started with `postgresql+psycopg://` and wasn't the pooled one, and removed that line from PowerShell's saved history.
