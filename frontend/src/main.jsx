@@ -5,6 +5,7 @@ import AuthProvider from "./components/AuthProvider";
 import RequireAuth from "./components/RequireAuth";
 import WakingBanner from "./components/WakingBanner";
 import CourseListPage from "./pages/CourseListPage";
+import AlertsPage from "./pages/AlertsPage";
 import CoursePage from "./pages/CoursePage";
 import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
@@ -29,6 +30,7 @@ createRoot(document.getElementById("root")).render(
             <Route path="/courses/:courseId" element={<CoursePage />} />
             <Route path="/my-courses" element={<MyCoursesPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/alerts" element={<AlertsPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

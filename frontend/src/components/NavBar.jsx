@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router";
+import { useAlertCount } from "./AlertCount";
 import { useAuth } from "./AuthProvider";
 
 function linkClass(active) {
@@ -17,6 +18,7 @@ function NavItem({ to, active, children }) {
 
 export default function NavBar() {
   const { user, logout } = useAuth();
+  const { count } = useAlertCount();
   const { pathname, search } = useLocation();
   // "Courses I created" is the course list filtered to this instructor, so both list links lead to "/".
   const onList = pathname === "/";
@@ -36,6 +38,11 @@ export default function NavBar() {
           <>
             <NavItem to="/dashboard" active={pathname === "/dashboard"}>
               Dashboard
+            </NavItem>
+            <NavItem to="/alerts" active={pathname === "/alerts"}>
+              Alerts
+              {/* The number of alerts, once known and only when there are any. */}
+              {count > 0 && <span className="badge ml-1.5 bg-danger/10 text-danger tabular-nums">{count}</span>}
             </NavItem>
             <NavItem to={`/?instructor_id=${user.id}`} active={showingMine}>
               Courses I created

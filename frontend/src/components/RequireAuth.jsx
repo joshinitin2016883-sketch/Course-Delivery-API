@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from "react-router";
+import { AlertCountProvider } from "./AlertCount";
 import { useAuth } from "./AuthProvider";
 import NavBar from "./NavBar";
 
@@ -11,12 +12,13 @@ export default function RequireAuth() {
     return <Navigate to="/login" replace />;
   }
 
+  // The alert count is shared by the nav badge and the alerts page.
   return (
-    <>
+    <AlertCountProvider>
       <NavBar />
       <main className="mx-auto max-w-5xl px-4 py-8">
         <Outlet />
       </main>
-    </>
+    </AlertCountProvider>
   );
 }
