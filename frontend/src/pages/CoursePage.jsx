@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { completeLesson, enroll, getCourse } from "../api/courses";
 import ActivityFeed from "../components/ActivityFeed";
 import { useAuth } from "../components/AuthProvider";
+import BulkEnrol from "../components/BulkEnrol";
 import LearnersTable from "../components/LearnersTable";
 import LessonManager from "../components/LessonManager";
 import ManageCourse from "../components/ManageCourse";
@@ -166,7 +167,12 @@ export default function CoursePage() {
       </section>
 
       {/* Instructors only, as presentation: the server answers anyone else with 403. */}
-      {user.role === "instructor" && <LearnersTable courseId={course.id} changes={changes} />}
+      {user.role === "instructor" && (
+        <>
+          <BulkEnrol course={course} onEnrolled={() => setChanges((count) => count + 1)} />
+          <LearnersTable courseId={course.id} changes={changes} />
+        </>
+      )}
 
       <ActivityFeed courseId={course.id} canJoin={canJoinDiscussion} changes={changes} />
     </div>

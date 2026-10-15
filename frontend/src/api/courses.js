@@ -75,6 +75,12 @@ export function completeLesson(courseId, lessonId) {
   return apiRequest(`/courses/${courseId}/lessons/${lessonId}/complete`, { method: "POST" });
 }
 
+// Enrols the learners in a pasted (or uploaded) list of email addresses. The server splits the text and
+// answers with an outcome per distinct address, plus totals. Instructors only.
+export function bulkEnroll(courseId, text) {
+  return apiRequest(`/courses/${courseId}/enrollments/bulk`, { method: "POST", body: { text } });
+}
+
 // Every learner enrolled in the course, by name, with their progress. Instructors only (403 for anyone else).
 export function getCourseProgress(courseId) {
   return apiRequest(`/courses/${courseId}/progress`);
