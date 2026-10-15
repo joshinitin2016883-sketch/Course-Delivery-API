@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { completeLesson, enroll, getCourse } from "../api/courses";
 import { useAuth } from "../components/AuthProvider";
+import LearnersTable from "../components/LearnersTable";
 import LessonManager from "../components/LessonManager";
 import ManageCourse from "../components/ManageCourse";
 import { Empty, ErrorMessage, Loading } from "../components/States";
@@ -14,6 +15,9 @@ export default function CoursePage() {
   const [error, setError] = useState(null);
   const [enrolling, setEnrolling] = useState(false);
   const [enrollError, setEnrollError] = useState(null);
+  // Goes up after every change an instructor makes on this page, so the parts that load their own data
+  // (the learners table) load it again.
+  const [changes, setChanges] = useState(0);
 
   useEffect(() => {
     let ignore = false; // set if another course opens before this answer arrives
@@ -54,10 +58,17 @@ export default function CoursePage() {
     setCourse((current) => ({ ...current, my_progress: progress }));
   }
 
+  // A status move or a details edit: the server answered with the course as it now is.
+  function courseChanged(updated) {
+    setCourse(updated);
+    setChanges((count) => count + 1);
+  }
+
   // After an instructor changes the lessons, ask the server for the course again, so the page shows the
   // lessons exactly as saved (removing one renumbers the others).
   async function reloadCourse() {
     setCourse(await getCourse(course.id));
+    setChanges((count) => count + 1);
   }
 
   if (error) {
@@ -94,7 +105,7 @@ export default function CoursePage() {
       </div>
 
       {/* Instructors' tools. Showing them only to instructors is presentation: the API refuses anyone else. */}
-      {user.role === "instructor" && <ManageCourse course={course} onChanged={setCourse} />}
+      {user.role === "instructor" && <ManageCourse course={course} onChanged={courseChanged} />}
 
       {canEnroll && (
         <div className="rounded-xl border border-line bg-surface p-6">
@@ -150,6 +161,9 @@ export default function CoursePage() {
           </ol>
         )}
       </section>
+
+      {/* Instructors only, as presentation: the server answers anyone else with 403. */}
+      {user.role === "instructor" && <LearnersTable courseId={course.id} changes={changes} />}
     </div>
   );
 }

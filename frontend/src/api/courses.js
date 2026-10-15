@@ -75,6 +75,11 @@ export function completeLesson(courseId, lessonId) {
   return apiRequest(`/courses/${courseId}/lessons/${lessonId}/complete`, { method: "POST" });
 }
 
+// Every learner enrolled in the course, by name, with their progress. Instructors only (403 for anyone else).
+export function getCourseProgress(courseId) {
+  return apiRequest(`/courses/${courseId}/progress`);
+}
+
 // Every course the learner is enrolled in, newest enrolment first, with their progress in each.
 export function listMyCourses() {
   return apiRequest("/me/courses");
