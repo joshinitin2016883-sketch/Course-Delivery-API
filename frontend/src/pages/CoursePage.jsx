@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { completeLesson, enroll, getCourse } from "../api/courses";
+import ActivityFeed from "../components/ActivityFeed";
 import { useAuth } from "../components/AuthProvider";
 import LearnersTable from "../components/LearnersTable";
 import LessonManager from "../components/LessonManager";
@@ -16,7 +17,7 @@ export default function CoursePage() {
   const [enrolling, setEnrolling] = useState(false);
   const [enrollError, setEnrollError] = useState(null);
   // Goes up after every change an instructor makes on this page, so the parts that load their own data
-  // (the learners table) load it again.
+  // (the learners table and the activity feed) load it again.
   const [changes, setChanges] = useState(0);
 
   useEffect(() => {
@@ -89,6 +90,8 @@ export default function CoursePage() {
   // Which buttons show is presentation: the server refuses an enrolment or completion it doesn't allow.
   const canEnroll = user.role === "learner" && progress === null;
   const canComplete = progress !== null && !archived;
+  // Instructors can always join the discussion; a learner only once enrolled, archived course or not.
+  const canJoinDiscussion = user.role === "instructor" || progress !== null;
 
   return (
     <div className="space-y-8">
@@ -164,6 +167,8 @@ export default function CoursePage() {
 
       {/* Instructors only, as presentation: the server answers anyone else with 403. */}
       {user.role === "instructor" && <LearnersTable courseId={course.id} changes={changes} />}
+
+      <ActivityFeed courseId={course.id} canJoin={canJoinDiscussion} changes={changes} />
     </div>
   );
 }
