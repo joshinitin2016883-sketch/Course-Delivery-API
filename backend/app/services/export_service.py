@@ -24,13 +24,17 @@ COLUMNS = [
     "completed_at",
     "last_activity_at",
 ]
+# The UTF-8 byte-order mark, written first so Excel on Windows reads the file as UTF-8 and shows names such
+# as "José Núñez" correctly. Other CSV readers skip it when they decode with utf-8-sig.
+BOM = "﻿"
 # A spreadsheet runs a cell that starts with one of these as a formula. Names are typed by people and the file
 # is made to be opened in Excel, so such a cell gets a leading apostrophe and shows as plain text instead.
 FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
 
 def progress_csv(db: Session, viewer: User, course_id: int) -> tuple[str, str]:
-    """The CSV text, and the name to save it under: course-<id>-progress-<today's UTC date>.csv."""
+    """The CSV text (starting with the byte-order mark), and the name to save it under:
+    course-<id>-progress-<today's UTC date>.csv."""
     learners = enrollment_service.course_progress(db, viewer, course_id)
     out = io.StringIO()
     writer = csv.writer(out)
@@ -48,7 +52,7 @@ def progress_csv(db: Session, viewer: User, course_id: int) -> tuple[str, str]:
             _time(row.last_activity_at),
         ])
     filename = f"course-{course_id}-progress-{datetime.now(timezone.utc).date().isoformat()}.csv"
-    return filename, out.getvalue()
+    return filename, BOM + out.getvalue()
 
 
 def _cell(text: str) -> str:

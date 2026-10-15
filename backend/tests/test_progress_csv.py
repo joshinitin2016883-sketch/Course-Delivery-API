@@ -33,7 +33,8 @@ def enrolled_learner(client, make_user, auth_header, course_id, email, name):
 
 
 def read_csv(response):
-    return list(csv.reader(io.StringIO(response.text)))
+    """The rows of the CSV, decoded the way a reader should: utf-8-sig skips the byte-order mark."""
+    return list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
 
 
 def test_the_csv_has_the_same_learners_in_the_same_order_as_the_progress_list(client, make_user, auth_header, as_priya):
@@ -86,6 +87,23 @@ def test_ordinary_names_are_left_as_they_are(client, make_user, auth_header, as_
     [row] = read_csv(client.get(f"/courses/{course_id}/progress.csv", headers=as_priya))[1:]
 
     assert row[0] == "Alex Chen"
+
+
+def test_the_file_starts_with_the_utf8_byte_order_mark(client, as_priya):
+    course_id = published_course(client, as_priya)
+
+    response = client.get(f"/courses/{course_id}/progress.csv", headers=as_priya)
+
+    assert response.content.startswith(b"\xef\xbb\xbf")
+
+
+def test_a_non_ascii_name_reads_back_unchanged(client, make_user, auth_header, as_priya):
+    course_id = published_course(client, as_priya)
+    enrolled_learner(client, make_user, auth_header, course_id, "jose@example.com", "José Núñez")
+
+    [row] = read_csv(client.get(f"/courses/{course_id}/progress.csv", headers=as_priya))[1:]
+
+    assert row[0] == "José Núñez"
 
 
 def test_the_file_is_an_attachment_named_after_the_course_and_the_utc_date(client, as_priya):
