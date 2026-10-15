@@ -30,6 +30,17 @@ export function createCourse({ title, description, category }) {
   return apiRequest("/courses", { method: "POST", body: { title, description, category } });
 }
 
+// Saves a course's title, description and category; all three are sent every time.
+export function updateCourse(courseId, { title, description, category }) {
+  return apiRequest(`/courses/${courseId}`, { method: "PUT", body: { title, description, category } });
+}
+
+// move is "publish", "archive" or "restore". The server decides which moves are allowed from the
+// current status, and answers with the course as it now is.
+export function changeStatus(courseId, move) {
+  return apiRequest(`/courses/${courseId}/${move}`, { method: "POST" });
+}
+
 export function enroll(courseId) {
   return apiRequest(`/courses/${courseId}/enroll`, { method: "POST" });
 }

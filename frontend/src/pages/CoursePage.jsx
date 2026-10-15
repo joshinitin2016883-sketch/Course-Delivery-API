@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { completeLesson, enroll, getCourse } from "../api/courses";
 import { useAuth } from "../components/AuthProvider";
+import ManageCourse from "../components/ManageCourse";
 import { Empty, ErrorMessage, Loading } from "../components/States";
 import { CourseStatusBadge, ProgressSummary } from "../components/Status";
 
@@ -84,6 +85,9 @@ export default function CoursePage() {
         </p>
         <p className="max-w-prose whitespace-pre-wrap wrap-break-word">{course.description}</p>
       </div>
+
+      {/* Instructors' tools. Showing them only to instructors is presentation: the API refuses anyone else. */}
+      {user.role === "instructor" && <ManageCourse course={course} onChanged={setCourse} />}
 
       {canEnroll && (
         <div className="rounded-xl border border-line bg-surface p-6">
