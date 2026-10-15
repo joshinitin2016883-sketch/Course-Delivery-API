@@ -12,7 +12,15 @@ from app.services.errors import Conflict, InvalidInput, NotAuthenticated, NotFou
 app = FastAPI(title="Course Delivery API")
 
 # Let the frontend (a different origin) call the API. Logins use a header, not cookies, so no credentials mode.
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+# A browser only lets the page read a few response headers from another origin; Content-Disposition carries
+# the CSV export's filename, so it is exposed too.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+)
 
 # The one place where service errors become HTTP status codes.
 STATUS_CODES = {
