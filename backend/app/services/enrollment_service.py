@@ -155,8 +155,9 @@ def complete_lesson(db: Session, learner: User, course_id: int, lesson_id: int) 
         raise Conflict("This course is archived, so you can't complete lessons in it any more.")
 
     if lesson.id not in _completed_lesson_ids(db, enrollment):
+        # One timestamp for the completion row and the enrolment's times, so they always agree.
         now = datetime.now(timezone.utc)
-        db.add(LessonCompletion(enrollment_id=enrollment.id, lesson_id=lesson.id))
+        db.add(LessonCompletion(enrollment_id=enrollment.id, lesson_id=lesson.id, completed_at=now))
         if enrollment.status == EnrollmentStatus.NOT_STARTED:
             _move(enrollment, EnrollmentStatus.IN_PROGRESS, now)
         enrollment.last_activity_at = now

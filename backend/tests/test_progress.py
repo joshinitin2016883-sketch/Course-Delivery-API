@@ -104,6 +104,30 @@ def test_a_one_lesson_course_goes_through_both_moves_in_one_request(client, as_i
     assert progress["started_at"] is not None and progress["completed_at"] is not None
 
 
+def test_a_completion_and_the_enrolment_share_one_timestamp(client, db, learner, as_instructor, as_learner):
+    # The enrolment's times copy its completions' times, so they must be the same instant, not two clocks
+    # a few milliseconds apart.
+    course_id, [first, second] = enrolled_course(client, as_instructor, as_learner, lessons=2)
+
+    complete(client, as_learner, course_id, first)
+    enrollment = enrollment_of(db, learner, course_id)
+    first_done = completed_at(db, enrollment, first)
+    assert enrollment.started_at == enrollment.last_activity_at == first_done
+
+    complete(client, as_learner, course_id, second)  # the last lesson, so this finishes the course
+    enrollment = enrollment_of(db, learner, course_id)
+    assert enrollment.last_activity_at == enrollment.completed_at == completed_at(db, enrollment, second)
+    assert enrollment.started_at == first_done
+
+
+def completed_at(db, enrollment, lesson_id):
+    return db.scalar(
+        select(LessonCompletion.completed_at).where(
+            LessonCompletion.enrollment_id == enrollment.id, LessonCompletion.lesson_id == lesson_id
+        )
+    )
+
+
 def test_completing_a_lesson_twice_changes_nothing(client, db, learner, as_instructor, as_learner):
     course_id, [first, _second, _third] = enrolled_course(client, as_instructor, as_learner)
     first_time = complete(client, as_learner, course_id, first).json()
