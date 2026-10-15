@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import CORS_ORIGINS
-from app.routers import activity, auth, courses, enrollments, instructors, lessons
+from app.routers import activity, auth, courses, dashboard, enrollments, instructors, lessons
 from app.services.errors import Conflict, InvalidInput, NotAuthenticated, NotFound, PermissionDenied, ServiceError
 
 app = FastAPI(title="Course Delivery API")
@@ -52,3 +52,4 @@ app.include_router(lessons.router)
 app.include_router(activity.router)
 app.include_router(enrollments.router)
 app.include_router(instructors.router)
+app.include_router(dashboard.router)
