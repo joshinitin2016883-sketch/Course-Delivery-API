@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import CORS_ORIGINS
 from app.routers import activity, auth, courses, enrollments, instructors, lessons
-from app.services.errors import Conflict, NotAuthenticated, NotFound, PermissionDenied, ServiceError
+from app.services.errors import Conflict, InvalidInput, NotAuthenticated, NotFound, PermissionDenied, ServiceError
 
 app = FastAPI(title="Course Delivery API")
 
@@ -20,6 +20,7 @@ STATUS_CODES = {
     PermissionDenied: 403,
     NotFound: 404,
     Conflict: 409,
+    InvalidInput: 422,
 }
 
 

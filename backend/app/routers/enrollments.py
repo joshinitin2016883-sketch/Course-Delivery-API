@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.models import User
-from app.schemas.enrollments import EnrollmentOut, LearnerProgressOut, ProgressOut
+from app.schemas.enrollments import BulkEnrollIn, BulkEnrollOut, EnrollmentOut, LearnerProgressOut, ProgressOut
 from app.services import enrollment_service
 
 router = APIRouter(tags=["enrolment"])
@@ -13,6 +13,14 @@ router = APIRouter(tags=["enrolment"])
 @router.post("/courses/{course_id}/enroll", response_model=EnrollmentOut, status_code=201)
 def enroll(course_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return enrollment_service.enroll(db, user, course_id)
+
+
+# 200, not 201: the answer is a report with an outcome per address, and some may not have enrolled anyone.
+@router.post("/courses/{course_id}/enrollments/bulk", response_model=BulkEnrollOut)
+def bulk_enroll(
+    course_id: int, body: BulkEnrollIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return enrollment_service.bulk_enroll(db, user, course_id, body.text)
 
 
 @router.post("/courses/{course_id}/lessons/{lesson_id}/complete", response_model=ProgressOut)

@@ -4,18 +4,31 @@ A learner's progress through a course moves Not started -> In progress -> Comple
 by hand: it moves as they complete lessons, through the one table of allowed moves below.
 A learner only ever sees their own progress; instructors see everyone's.
 """
+import re
+from collections import Counter
 from datetime import datetime, timezone
 
 from psycopg.errors import UniqueViolation
 from sqlalchemy import ColumnElement, func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Course, CourseStatus, Enrollment, EnrollmentStatus, Lesson, LessonCompletion, Role, User
 from app.schemas.courses import CourseOut
-from app.schemas.enrollments import CourseSummaryOut, EnrollmentOut, LearnerOut, LearnerProgressOut, ProgressOut
+from app.schemas.enrollments import (
+    BulkEnrollCounts,
+    BulkEnrollOut,
+    BulkEnrollRow,
+    CourseSummaryOut,
+    EnrollmentOut,
+    LearnerOut,
+    LearnerProgressOut,
+    ProgressOut,
+)
 from app.services import course_service
-from app.services.errors import Conflict, NotFound, PermissionDenied
+from app.services.auth_service import normalize_email
+from app.services.errors import Conflict, InvalidInput, NotFound, PermissionDenied
 from app.services.permissions import require_instructor, require_learner
 
 # The only moves an enrolment can make. Any other move would be a bug in this file, so _move refuses it.
@@ -47,6 +60,76 @@ def enroll(db: Session, learner: User, course_id: int) -> EnrollmentOut:
         raise
     db.commit()
     return _enrollments_with_progress(db, Enrollment.id == enrollment.id)[0]
+
+
+# Bulk enrolment (goal 7). A pasted list may separate addresses with commas, semicolons, spaces or new lines.
+MAX_BULK_ADDRESSES = 500
+ADDRESS_SEPARATORS = re.compile(r"[,;\s]+")
+# Deliberately simple, not a full RFC check: one "@", something before it, and a dot somewhere after it.
+LOOKS_LIKE_EMAIL = re.compile(r"[^@]+@[^@]+\.[^@]+")
+
+
+def bulk_enroll(db: Session, instructor: User, course_id: int, text: str) -> BulkEnrollOut:
+    """Enrol every learner in a pasted list of email addresses, and report what happened to each address:
+    enrolled, already enrolled, unknown (no account), invalid (not an address), or not a learner.
+
+    All in one transaction. It takes the same shared lock on the course as a learner enrolling themselves,
+    so an archive can't slip in meanwhile. New rows are inserted with ON CONFLICT DO NOTHING, so the unique
+    constraint stays the "already enrolled" check (Decision 18): a learner who enrolled themselves a moment
+    ago is skipped and reported as already enrolled, never a 500. Enrolments aren't logged (Decision 22);
+    enrolled_by records which instructor enrolled each learner."""
+    require_instructor(instructor)  # before the lookup, as everywhere else
+    addresses, repeats_removed = _split_addresses(text)
+    if not addresses:
+        raise InvalidInput("Paste at least one email address.")
+    if len(addresses) > MAX_BULK_ADDRESSES:
+        raise InvalidInput(f"At most {MAX_BULK_ADDRESSES} addresses at a time; this list has {len(addresses)}.")
+    course = course_service.lock_course_for_share(db, course_id)
+    if course.status != CourseStatus.PUBLISHED:
+        raise Conflict(f"Only a published course can take new learners, and this course is {course.status}.")
+
+    valid = [address for address in addresses if LOOKS_LIKE_EMAIL.fullmatch(address)]
+    accounts = {email: (user_id, role) for user_id, email, role in db.execute(
+        select(User.id, User.email, User.role).where(User.email.in_(valid))
+    )}
+    learner_ids = [user_id for user_id, role in accounts.values() if role == Role.LEARNER]
+    newly_enrolled = set()
+    if learner_ids:
+        rows = [{"course_id": course.id, "user_id": user_id, "enrolled_by": instructor.id} for user_id in learner_ids]
+        # RETURNING lists only the rows really added; learners already enrolled are skipped by the constraint.
+        newly_enrolled = set(db.scalars(
+            insert(Enrollment)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_enrollments_course_id_user_id")
+            .returning(Enrollment.user_id)
+        ))
+    db.commit()
+
+    outcomes = [_bulk_outcome(address, accounts, newly_enrolled) for address in addresses]
+    return BulkEnrollOut(
+        results=[BulkEnrollRow(email=address, outcome=outcome) for address, outcome in zip(addresses, outcomes)],
+        counts=BulkEnrollCounts(**Counter(outcomes)),
+        repeats_removed=repeats_removed,
+    )
+
+
+def _split_addresses(text: str) -> tuple[list[str], int]:
+    """The distinct addresses in the text, normalised like users.email (trimmed, lower-case), in the order
+    they first appear; and how many repeats were dropped."""
+    tokens = [normalize_email(token) for token in ADDRESS_SEPARATORS.split(text) if token]
+    distinct = list(dict.fromkeys(tokens))  # a dict keeps the first of each key, in order
+    return distinct, len(tokens) - len(distinct)
+
+
+def _bulk_outcome(address: str, accounts: dict[str, tuple[int, str]], newly_enrolled: set[int]) -> str:
+    if not LOOKS_LIKE_EMAIL.fullmatch(address):
+        return "invalid"
+    if address not in accounts:
+        return "unknown"
+    user_id, role = accounts[address]
+    if role != Role.LEARNER:
+        return "not_a_learner"
+    return "enrolled" if user_id in newly_enrolled else "already_enrolled"
 
 
 def complete_lesson(db: Session, learner: User, course_id: int, lesson_id: int) -> ProgressOut:

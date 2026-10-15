@@ -23,3 +23,7 @@ class NotFound(ServiceError):
 
 class Conflict(ServiceError):
     """The request clashes with the current state, e.g. a lesson order that doesn't match the course's lessons."""
+
+
+class InvalidInput(ServiceError):
+    """The request can't be used as sent, e.g. a pasted list with no addresses in it, or too many."""

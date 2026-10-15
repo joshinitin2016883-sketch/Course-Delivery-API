@@ -1,7 +1,42 @@
-"""Response bodies for enrolments and a learner's progress."""
+"""Request and response bodies for enrolments and a learner's progress."""
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
+
+
+class BulkEnrollIn(BaseModel):
+    """A pasted or uploaded list of email addresses, as one block of text: the server splits it. Capped, so a
+    huge paste is refused (422) before any work is done."""
+
+    text: Annotated[str, StringConstraints(max_length=200_000)]
+
+
+# What happened to one address in a bulk enrolment.
+BulkOutcome = Literal["enrolled", "already_enrolled", "unknown", "invalid", "not_a_learner"]
+
+
+class BulkEnrollRow(BaseModel):
+    email: str
+    outcome: BulkOutcome
+
+
+class BulkEnrollCounts(BaseModel):
+    """How many addresses had each outcome. An outcome that didn't happen counts 0."""
+
+    enrolled: int = 0
+    already_enrolled: int = 0
+    unknown: int = 0
+    invalid: int = 0
+    not_a_learner: int = 0
+
+
+class BulkEnrollOut(BaseModel):
+    """One row per distinct address, in the order they were pasted, plus the totals."""
+
+    results: list[BulkEnrollRow]
+    counts: BulkEnrollCounts
+    repeats_removed: int
 
 
 class CourseSummaryOut(BaseModel):
