@@ -43,10 +43,13 @@ export default function AuthProvider({ children }) {
       .finally(() => setChecking(false));
   }, []);
 
+  // Returns the signed-in user, so the sign-in page can choose where they land.
   async function login(email, password) {
     const { access_token } = await authApi.login(email, password);
     setToken(access_token);
-    setUser(await authApi.getMe());
+    const me = await authApi.getMe();
+    setUser(me);
+    return me;
   }
 
   function logout() {

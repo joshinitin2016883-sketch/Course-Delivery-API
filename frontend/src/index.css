@@ -18,6 +18,8 @@
   --color-success: #15803d;
   --color-warning: #b45309;
   --color-danger: #b91c1c;
+  /* The bars of the dashboard chart. Checked against the surface with the dataviz palette validator. */
+  --color-chart: #4f46e5;
 }
 
 /* Dark mode redefines the same tokens, so no component needs dark styles of its own. */
@@ -34,6 +36,7 @@
     --color-success: #4ade80;
     --color-warning: #fbbf24;
     --color-danger: #f87171;
+    --color-chart: #6366f1; /* darker than the dark accent, which is too light for a large fill */
   }
 }
 

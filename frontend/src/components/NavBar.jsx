@@ -33,9 +33,14 @@ export default function NavBar() {
         </NavItem>
         {/* Each role's own links are presentation only: the API still decides what each person can do. */}
         {user.role === "instructor" && (
-          <NavItem to={`/?instructor_id=${user.id}`} active={showingMine}>
-            Courses I created
-          </NavItem>
+          <>
+            <NavItem to="/dashboard" active={pathname === "/dashboard"}>
+              Dashboard
+            </NavItem>
+            <NavItem to={`/?instructor_id=${user.id}`} active={showingMine}>
+              Courses I created
+            </NavItem>
+          </>
         )}
         {user.role === "learner" && (
           <NavItem to="/my-courses" active={pathname === "/my-courses"}>

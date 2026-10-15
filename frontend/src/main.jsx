@@ -6,6 +6,7 @@ import RequireAuth from "./components/RequireAuth";
 import WakingBanner from "./components/WakingBanner";
 import CourseListPage from "./pages/CourseListPage";
 import CoursePage from "./pages/CoursePage";
+import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
 import MyCoursesPage from "./pages/MyCoursesPage";
 import NewCoursePage from "./pages/NewCoursePage";
@@ -27,6 +28,7 @@ createRoot(document.getElementById("root")).render(
             <Route path="/courses/new" element={<NewCoursePage />} />
             <Route path="/courses/:courseId" element={<CoursePage />} />
             <Route path="/my-courses" element={<MyCoursesPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

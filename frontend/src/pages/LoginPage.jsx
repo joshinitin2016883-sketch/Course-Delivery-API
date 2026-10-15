@@ -3,6 +3,11 @@ import { Navigate, useNavigate } from "react-router";
 import { useAuth } from "../components/AuthProvider";
 import { ErrorMessage } from "../components/States";
 
+// Where each role lands after signing in: instructors on their dashboard, learners on the course list.
+function homeFor(user) {
+  return user.role === "instructor" ? "/dashboard" : "/";
+}
+
 export default function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
@@ -13,7 +18,7 @@ export default function LoginPage() {
 
   // Already signed in: there is nothing to do here.
   if (user !== null) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={homeFor(user)} replace />;
   }
 
   async function handleSubmit(event) {
@@ -21,8 +26,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate("/", { replace: true });
+      const signedIn = await login(email, password);
+      navigate(homeFor(signedIn), { replace: true });
     } catch (err) {
       // The server's own message, such as "Incorrect email or password."
       setError(err.message);
