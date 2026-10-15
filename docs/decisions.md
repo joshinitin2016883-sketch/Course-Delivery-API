@@ -108,6 +108,7 @@
 - **Chose:** Enrolled learners keep read-only access to an archived course. It stays in My courses, marked as archived, and they can open it, read its lessons, comment and read the comments. Completing a lesson there gets a 409. Learners who aren't enrolled get the same 404 as for a course that doesn't exist.
 - **Rejected:** Hiding archived courses from everyone, and letting learners keep making progress in them.
 - **Why:** The brief says archiving removes a course from the catalogue without deleting any learner's enrolment history, so learners should still see their own record. Archived means retired, though, so their progress there is frozen.
+- **Updated in step 9:** In-progress learners on an archived course don't count as "learners in progress" on the dashboard, and never raise inactivity alerts (Decisions 46 and 50).
 
 ## Decision 18: Enrolling
 
@@ -140,6 +141,7 @@
 - **Rejected:** Logging every enrolment and completion.
 - **Why:** The brief's goal 9 lists what the log records: when the course was created, every edit, every publish or archive transition, and comments. Enrolments and completions aren't on that list. They're learner activity rather than changes to the course, and logging them would bury the course's history under progress entries. The enrollments and lesson_completions tables already record who did what and when.
 - **Updated in step 8:** Bulk enrolment by an instructor isn't logged either. `enrollments.enrolled_by` records which instructor enrolled each learner, and `enrolled_at` records when.
+- **Updated in step 9:** Dismissing an inactivity alert isn't logged either. `alert_dismissals` records who dismissed it and when, and its rows are never deleted (Decision 51).
 
 ## Decision 23: Deploying the API
 
@@ -185,6 +187,7 @@
 - **Why:** Hiding what you can't use keeps each page clear. But anyone can call the API without the page, so the page can't be where the rules live. An instructor who enrols anyway gets a 403, completing a lesson before enrolling gets a 403, completing one in an archived course gets a 409, and a learner is never sent a draft. A page that's out of date, say a course archived while it's open, still ends with a clear answer: the server refuses, and the page shows why.
 - **Updated in step 7:** The same goes for the instructor tools. The manage section, the lesson tools, the learners table, New course and Courses I created are shown to instructors only, and the comment box only to people who can join the discussion. Inputs carry the API's length limits as maxLength, which only stops typing past them; the server still checks every value.
 - **Updated in step 8:** Enrol learners and Download CSV are shown to instructors only; the server refuses learners with 403.
+- **Updated in step 9:** Dashboard and Alerts are in the nav for instructors only, and instructors land on the dashboard after signing in. `GET /dashboard`, `GET /alerts` and `POST /alerts/dismiss` refuse learners with 403.
 
 ## Decision 30: Listing instructors for the filter
 
@@ -282,3 +285,55 @@
 - **Chose:** The page fetches the file with the token in the header, turns it into a blob, and saves it under the filename from the server's Content-Disposition. CORS exposes that header to the frontend's origin.
 - **Rejected:** A plain link, a token in the URL, and having the frontend make up its own filename.
 - **Why:** The token travels in a header (Decision 1), which a plain link can't send. A token in the URL would end up in browser history and server logs. Exposing the header keeps the server as the one place that names the file.
+
+## Decision 46: The dashboard's numbers
+
+- **Chose:** `GET /dashboard`, for instructors only, returns everything the page shows in one request, counted with aggregates when it's read: every learner account; published courses; completions this month, meaning courses completed since midnight UTC on the 1st; learners in progress, meaning learners with an in-progress enrolment on a course that isn't archived, each counted once however many courses they're in; enrolments by course and state, for every course with at least one enrolment, archived ones included and marked, sorted like titles (Decision 26); and course completions in each of the last 8 weeks (Decision 48).
+- **Rejected:** Stored counters or a summary table kept up to date by every change, counting completed lessons as completions, and counting learners whose course is archived as in progress.
+- **Why:** Counts made on read are always right, and nothing has to remember to keep them in step (Decision 25); at this size each one is a single aggregate query. A completion means a learner finished a whole course, which is what the brief wants to see. Progress in an archived course is frozen (Decision 17), so those learners aren't currently in progress. "Learners" could mean several things, so each tile on the page says in one line what it counts.
+
+## Decision 47: One clock, the database's now()
+
+- **Chose:** The dashboard and the alerts measure time with the database's `now()`, in every query. Inside one request it's the start of the transaction, so it doesn't move.
+- **Rejected:** The API server's clock (`datetime.now()`) for these queries, and mocking the clock in tests.
+- **Why:** With one clock that stands still for the request, the dashboard's numbers agree with each other, and the alerts use the same clock. Tests gain the same way: inside a test's transaction `now()` is fixed, so a test can place a row exactly 14 days before it, with no clock mocking. Lesson completions are still stamped with the API's own clock (step 4). The two machines' clocks may differ slightly, which can't matter for rules counted in days, weeks and months.
+
+## Decision 48: Weeks and months in UTC, whatever the session's time zone
+
+- **Chose:** Months and weeks are calendar ones in UTC, and a week starts on Monday (Postgres's `date_trunc('week')`). Every date calculation names UTC itself rather than relying on the session's time zone: `date_trunc(..., 'UTC')`, then `date_subtract(..., 'UTC')` to find the first of the 8 weeks, and `generate_series(..., interval '1 week', 'UTC')` to step through them, so a week with no completions still gets a row with 0. The last two need Postgres 16 or later; the local database and Neon both run 17.11. The current week is marked `partial`, and the chart labels it "so far".
+- **Rejected:** Weeks in each viewer's own time zone, and relying on the session's time zone being UTC.
+- **Why:** A shared dashboard needs one "this week" for everyone. Date arithmetic on a `timestamptz` happens in the session's time zone, where a week that crosses a daylight-saving change is 167 or 169 hours long. My local database runs in UTC, so the first tests couldn't see this. A test that sets the session to a daylight-saving zone exposed two bugs:
+  1. `generate_series` stepped a week at a time in the session's time zone. Review caught this one, and the fix is its fourth argument, `'UTC'`.
+  2. With that fixed, the new test still failed. The first week was found by subtracting 7 weeks from this Monday, and that subtraction also ran in the session's time zone. Under Sydney time in October the series started at 01:00 UTC, so every week was an hour off midnight and the current week fell off the end: 7 weeks, not 8. The fix is `date_subtract(..., 'UTC')`.
+
+  With both bugs in place they partly cancelled out: the weeks after Sydney's clock change came out right, which is why the second was easy to miss. The test uses the first of five daylight-saving zones (New York, London, Sydney, Auckland, Santiago) whose clock changes between the first and last Monday on the chart, puts one completion at the very start of each UTC Monday, and expects one per week; removing either `'UTC'` makes it fail. For about half the year none of the five changes inside the window, and then the test skips and says so, rather than pass without crossing a change.
+
+## Decision 49: The dashboard page
+
+- **Chose:** Instructors land on the dashboard after signing in and have a Dashboard link in the nav; learners still land on the course list. The page shows the four numbers as tiles, each with a note on what it counts, then the 8-week chart, then the enrolments-by-course table with a link to each course. The chart is plain HTML: eight columns in a CSS grid, one colour, no legend, each column's number on hover, and a "Show as a table" version that screen readers read instead of the drawing. The bars have their own colour token, checked against both themes with a palette validator: the dark theme's accent was too light for a large fill, so dark mode uses `#6366f1`.
+- **Rejected:** An SVG chart, a chart library, and a paler bar for the unfinished week.
+- **Why:** An SVG scaled down to a phone's width shrinks its text to about 6px, while HTML columns keep their labels at normal size. Eight bars need nothing more, and a library would be a dependency to explain for them. One series needs no legend, since the heading says what's plotted. A paler current week made the newest bar the faintest on the chart, so the "so far" label marks it instead. Hiding the link is presentation: `GET /dashboard` refuses learners (Decision 29).
+
+## Decision 50: The inactivity alert rule
+
+- **Chose:** A learner has an alert on a course when their enrolment is in progress, the course is published, and their last completed lesson was more than 14 days ago, written as `now() - last_activity_at > interval '14 days'`. Exactly 14 days isn't an alert yet. Alerts aren't stored: they're worked out each time they're read, and a dismissal hides one (Decision 51).
+- **Rejected:** A scheduled job that writes alert rows, and writing the rule as `last_activity_at < now() - interval '14 days'`.
+- **Why:** Worked out on read, an alert is right at the moment it's shown, and nothing has to run on a schedule, which a free Render service that sleeps after 15 minutes couldn't do reliably anyway. Learners who haven't started can't have gone quiet, and completed ones are done. Progress in an archived course is frozen (Decision 17), so it raises no alerts. The rule measures the time since the last lesson because subtracting one timestamp from another gives the exact time between them, whatever the session's time zone, and comparing two intervals counts a day as 24 hours. The rejected form subtracts 14 calendar days in the session's time zone, the trap in Decision 48: with the session on Sydney time in October, it flags a learner whose last lesson was only 13 days and 23½ hours ago. Tests pin the boundary: exactly 14 days gives no alert, and 14 days and a minute gives one. A known limitation: when an archived course is restored, its in-progress learners can alert at once, because the time it spent archived counts as quiet.
+
+## Decision 51: Dismissing an alert
+
+- **Chose:** `POST /alerts/dismiss` with `{course_id, learner_id}`, for instructors only, adds a row to `alert_dismissals`: the enrolment, `quiet_since` (its `last_activity_at` at that moment), who dismissed it and when. An alert stays hidden while a dismissal's `quiet_since` equals the enrolment's current `last_activity_at`. When the learner completes another lesson, `last_activity_at` moves on and the old row stops matching, so if they then go quiet for another 14 days the alert comes back. A dismissal hides the alert for every instructor. The unique pair (`enrollment_id`, `quiet_since`) is the "already dismissed" check: rows go in with `INSERT ... ON CONFLICT DO NOTHING RETURNING`, and an empty answer means a 409. Rows are never updated or deleted.
+- **Rejected:** A dismissed flag on the enrolment that completing a lesson would clear, dismissals per instructor, deleting a dismissal when the learner comes back, and writing dismissals to the activity log.
+- **Why:** The brief says a dismissed alert reappears when the learner engages again and later goes quiet for the same length of time. Tying each dismissal to one quiet spell gives exactly that without extra code: `complete_lesson` doesn't have to remember to clear anything, so a bug there can't hide an alert for ever, and the kept rows record who dismissed what. Instructors share every course (Decision 3), so they share its alerts. Two instructors dismissing the same alert at once get one row and a 409, never a 500, the same pattern as enrolling (Decisions 18 and 42). There are two 409 messages: "This learner has no alert on this course any more." when the learner has been active since, has finished, the course was archived, or there's no such enrolment; and "This alert has already been dismissed." A dismissal concerns a learner, not a change to the course, so it isn't logged (Decision 22).
+
+## Decision 52: The alerts page and the nav badge
+
+- **Chose:** Instructors have an Alerts link in the nav, with a badge giving the number of current alerts, hidden at 0. The badge is the length of `GET /alerts`, the same list the page shows, fetched again on every move to another page and straight after each dismiss, never on a timer. Each row shows the learner's name and email, the course (linked), "Quiet for N days, since `<date>`", and a Dismiss button with no confirm step. After every dismiss, successful or not, the list reloads, and a 409 shows the server's message.
+- **Rejected:** Polling on a timer, a separate count endpoint, and asking before dismissing.
+- **Why:** Alerts change over days, so a count one page change old is fine. Polling would send a request from every open instructor tab every few seconds, which would keep Neon's free compute from suspending (Decision 23). With one endpoint, the badge and the page can't disagree about what counts as an alert. A dismissal changes nothing about the learner or the course, so asking first would only slow instructors down. The cost: there's no undo, and a mis-click hides that learner's alert until they complete another lesson. Reloading after each dismiss shows what's really left, including other instructors' dismissals.
+
+## Decision 53: Demo data
+
+- **Chose:** `python -m app.seed --demo` adds demo data after the 7 accounts: 20 more learners with the same password, 7 courses (5 published, one draft, one archived), enrolments in every state, completions over the last 8 weeks, 5 quiet learners (Priya has already dismissed one's alert, so 4 show), and 6 comments. Rows are inserted directly, with times relative to the moment it runs, by the database's clock. It only adds data to a database with no courses and never deletes anything. A fixed random seed gives the same data every time, apart from the dates.
+- **Rejected:** Creating the data through the API, fixed calendar dates, and a seed that deletes everything and starts again.
+- **Why:** The API only records "now", so data made through it would leave the chart empty and nobody quiet for 14 days. Fixed dates would slide out of the 8-week chart within weeks. Deleting isn't safe on a live database, and the log's trigger refuses it anyway (Decision 6), so resetting Neon is a deliberate manual step in `docs/deploy.md`. Inserting directly bypasses the services, so a test checks that every enrolment is what they would have left: in progress means some lessons done but not all, with `last_activity_at` at the latest completion; completed means every lesson done, finished at the last one; not started means none. The activity log gets the rows the services would have written, in time order, with their past times set on insert, because a log row can't be corrected afterwards. The cost: the numbers drift as days pass, so I re-seed before submitting.
