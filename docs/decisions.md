@@ -114,6 +114,7 @@
 - **Chose:** Learners enrol themselves, in published courses only (instructors will enrol learners through bulk enrolment, later). Enrolling takes a shared lock on the course row, so an archive can't slip in at the same moment. The unique constraint on course and learner is the "already enrolled" check.
 - **Rejected:** Enrolling in drafts or archived courses, and checking for an existing enrolment in code before inserting.
 - **Why:** A draft isn't finished and an archived course is retired, so neither should take new learners. A check in code can't stop two requests that arrive together. The database constraint can, and both cases end in the same 409.
+- **Updated in step 8:** Instructors now enrol learners in bulk (Decision 42). It keeps the same rules: published courses only, the same shared lock, and the unique constraint as the "already enrolled" check.
 
 ## Decision 19: What learners see before enrolling
 
@@ -138,6 +139,7 @@
 - **Chose:** Enrolments and completions aren't written to the activity log. They live in their own tables, with their times.
 - **Rejected:** Logging every enrolment and completion.
 - **Why:** The brief's goal 9 lists what the log records: when the course was created, every edit, every publish or archive transition, and comments. Enrolments and completions aren't on that list. They're learner activity rather than changes to the course, and logging them would bury the course's history under progress entries. The enrollments and lesson_completions tables already record who did what and when.
+- **Updated in step 8:** Bulk enrolment by an instructor isn't logged either. `enrollments.enrolled_by` records which instructor enrolled each learner, and `enrolled_at` records when.
 
 ## Decision 23: Deploying the API
 
@@ -182,6 +184,7 @@
 - **Rejected:** Showing every button and letting the server refuse, and treating the hidden buttons as the protection.
 - **Why:** Hiding what you can't use keeps each page clear. But anyone can call the API without the page, so the page can't be where the rules live. An instructor who enrols anyway gets a 403, completing a lesson before enrolling gets a 403, completing one in an archived course gets a 409, and a learner is never sent a draft. A page that's out of date, say a course archived while it's open, still ends with a clear answer: the server refuses, and the page shows why.
 - **Updated in step 7:** The same goes for the instructor tools. The manage section, the lesson tools, the learners table, New course and Courses I created are shown to instructors only, and the comment box only to people who can join the discussion. Inputs carry the API's length limits as maxLength, which only stops typing past them; the server still checks every value.
+- **Updated in step 8:** Enrol learners and Download CSV are shown to instructors only; the server refuses learners with 403.
 
 ## Decision 30: Listing instructors for the filter
 
@@ -243,3 +246,39 @@
 - **Chose:** Each entry says who, what in plain words, and when in the viewer's local time: "Priya Shah changed the title from "Old" to "New"", "added lesson 3, "Getting started"", "published the course". Long texts, such as a description or a lesson's content, are named rather than quoted, and a reorder just says "reordered the lessons". Comments show their text as plain text, with an "Instructor" label on instructors' comments. The feed loads 20 entries at a time with "Load older" (Decision 9) and reloads its newest page after every change made on the page.
 - **Rejected:** Quoting old and new text in full, naming the new lesson order, and relative times such as "2 hours ago".
 - **Why:** Plain sentences make the history readable. A 5,000-character description quoted twice would bury everything else. For a reorder the log keeps only lesson ids, and lessons removed since then couldn't be named. A relative time needs a timer to stay true, while a local date and time is exact and needs nothing. Learners only get comments (Decision 8), and a learner who isn't enrolled sees "Enrol to join the discussion" instead of the box (Decision 20).
+
+## Decision 40: Bulk enrolment takes pasted text, and the server parses it
+
+- **Chose:** One endpoint takes the list as text: `POST /courses/{id}/enrollments/bulk` with `{"text": ...}`. The server splits it on commas, semicolons, spaces and new lines, trims and lower-cases each address like `users.email`, drops repeats while keeping the first-seen order, and reports how many it dropped. An uploaded `.csv` or `.txt` file is read in the browser into the same box, so the instructor sees exactly what will be sent.
+- **Rejected:** A separate file-upload endpoint, and parsing the list in the browser.
+- **Why:** One parser on the server means pasting and uploading behave the same, and one set of tests covers both. Seeing the file's text before sending catches a wrong file. Known limitations: a quoted address in a CSV (`"a@b.com"`) comes back as invalid, because the server doesn't strip quotes, and a header row such as `email` shows as one invalid row.
+
+## Decision 41: Five outcomes per address
+
+- **Chose:** Each distinct address gets one outcome, in the order pasted: `enrolled`, `already_enrolled`, `unknown` (no account), `invalid` (not an email address), or `not_a_learner` (an instructor's account). The result also gives the count of each outcome and the number of repeats removed. The answer is 200, not 201.
+- **Rejected:** Folding invalid addresses and instructor accounts into "unknown".
+- **Why:** Goal 7 asks for three outcomes. The other two tell the instructor what to fix: a typo is different from a missing account, and an instructor can't be enrolled. It's a report with mixed outcomes, so 201 ("created") would claim too much.
+
+## Decision 42: Bulk enrolment's rules and races
+
+- **Chose:** Instructors only, with the role checked before the course is looked up. Published courses only: a draft or archived course gets a 409 for the whole request. One transaction, under the same shared lock on the course as self-enrolment. New rows go in with `INSERT ... ON CONFLICT DO NOTHING RETURNING`, and that alone decides "enrolled" versus "already enrolled"; there's no check beforehand. At most 500 distinct addresses and 200,000 characters; beyond that, or with no addresses at all, the answer is 422.
+- **Rejected:** Checking for existing enrolments before inserting, one transaction per address, and enrolling into a draft.
+- **Why:** The unique constraint stays the "already enrolled" check (Decision 18). A learner who enrols themselves at the same moment is reported as already enrolled, never as a 500, and with no check beforehand there's no gap for that race to fall into. The shared lock stops an archive from slipping in (Decision 7). The limits keep a single request bounded. The 422 comes from a new InvalidInput error, mapped in `main.py` like the others.
+
+## Decision 43: The progress CSV
+
+- **Chose:** `GET /courses/{id}/progress.csv` builds its rows from `course_progress()`, the same function as the Enrolled learners list: same learners, same order, instructors only. It uses Python's csv module and writes UTF-8 with a byte-order mark. Times are ISO 8601 in UTC to the second, and empty when they haven't happened yet. It's sent as an attachment named `course-<id>-progress-<UTC date>.csv`. Draft and archived courses can still be exported.
+- **Rejected:** A second query for the file, local times, and UTF-8 without the mark.
+- **Why:** One source of rows means the file can't disagree with the screen. UTC ISO times are unambiguous for spreadsheets and other tools. The byte-order mark makes Excel on Windows read names like "José Núñez" correctly, while other readers skip it when they decode with `utf-8-sig`. A course's history is kept when it's archived, so it can still be exported.
+
+## Decision 44: Escaping spreadsheet formulas in the CSV
+
+- **Chose:** A cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe.
+- **Rejected:** Writing cells exactly as typed, and stripping those characters.
+- **Why:** Names are typed by people, and the file is made to be opened in Excel, where a name like `=HYPERLINK(...)` would run as a formula. The apostrophe makes the spreadsheet show the text as typed and run nothing. Stripping the characters would change the data.
+
+## Decision 45: Downloading the CSV with the sign-in token
+
+- **Chose:** The page fetches the file with the token in the header, turns it into a blob, and saves it under the filename from the server's Content-Disposition. CORS exposes that header to the frontend's origin.
+- **Rejected:** A plain link, a token in the URL, and having the frontend make up its own filename.
+- **Why:** The token travels in a header (Decision 1), which a plain link can't send. A token in the URL would end up in browser history and server logs. Exposing the header keeps the server as the one place that names the file.
