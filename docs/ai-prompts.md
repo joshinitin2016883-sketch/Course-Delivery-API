@@ -416,3 +416,464 @@ A draft of the ten decisions in the template's format.
 The agent corrected two claims in my notes. The brief never says instructors build courses "together"; it says the courses are "built by a couple of instructors". And the trigger doesn't stop everyone with SQL access, because the table's owner can drop it. What it guarantees is that rewriting history takes a deliberate step. I kept both corrections.
 
 <!-- Add here anything you reworded in the draft before committing it. -->
+
+## 9. Step 4: enrolment and progress
+
+### Prompt
+
+My nine decisions for step 4, the migration, the endpoints with their status codes, the tests I wanted, and the order of three commits. I asked for the plan and anything in my decisions it thought was wrong before any code.
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+This message is step 4 of my build: enrolment and progress. Work through it in the order below and stop wherever it says to wait. docs/decisions.md (decisions 1–13) still stands; build on it. If your saved notes disagree with this message, this message wins.
+
+How we work (unchanged): I make every design call; show a plan and the exact file list before changing anything; business rules only in services/, routers just validate and call; every permission and state rule enforced on the server; pytest tests for every rule, and the full suite (`python -m pytest`, warnings are errors) passes before you call a change done; never commit or push; after each change give me Summary, Description and file list, then wait until I say it's committed.
+
+## My decisions for step 4 (already made)
+1. Completing a lesson: the learner presses Mark complete on each lesson. The course state is worked out by the server from those, never set by hand.
+2. Deleting a lesson that any learner has completed: refused with 409. The service checks first, and a RESTRICT foreign key from lesson_completions makes the database enforce it too. Lessons nobody completed are still hard-deleted.
+3. A lesson added to a course a learner has already completed: they stay Completed (progress shows e.g. 5 of 6). The brief rejects any move other than Not started → In progress → Completed, so there is no going back.
+4. Archived courses: enrolled learners keep read-only access. The course stays in My courses, marked archived; they can open it and its lessons, but can't complete anything new there (409). Learners who aren't enrolled still get 404.
+5. Enrolment: published courses only.
+6. Before enrolling, a learner sees a published course's title, description and lesson titles, but not lesson content.
+7. Comments and the feed: learners must be enrolled. A learner who can see the course but isn't enrolled gets 403 ("Enrol in this course to join the discussion"); a course they can't see is still 404. Instructors are unchanged.
+8. No unenrolling in this version.
+9. Enrolments and completions are not written to activity_log: they are learner activity, not changes to the course.
+
+## Database (migration 0004)
+- enrollments: id; course_id → courses; user_id → users (a learner); status text with CHECK (not_started, in_progress, completed), default not_started; enrolled_by → users; enrolled_at default now(); started_at, completed_at, last_activity_at (nullable). UNIQUE (course_id, user_id). CHECKs tying status to times: completed exactly when completed_at is set; not_started exactly when started_at is empty. Indexes on (user_id) and (course_id, status).
+- lesson_completions: id; enrollment_id → enrollments; lesson_id → lessons ON DELETE RESTRICT; completed_at default now(). UNIQUE (enrollment_id, lesson_id).
+- Write the allowed values into the migration (not imported from app code). Run 0004 up, down, up on the dev database, and finish with alembic check.
+
+## Endpoints and rules
+- POST /courses/{id}/enroll: learners only (instructors 403, role checked before the lookup). The course must be published and visible (else 404). Already enrolled → 409. A race between two enrol requests must leave one row and give the loser 409 (catch the unique violation). Returns 201 with the enrolment.
+- POST /courses/{id}/lessons/{lesson_id}/complete: enrolled learners only (not enrolled → 403, can't see course → 404, lesson not in this course → 404, archived course → 409). Completing a lesson twice changes nothing and returns 200.
+  - One table of allowed progress moves (not_started → in_progress, in_progress → completed); any other move is a programming error.
+  - The first completion moves Not started → In progress (sets started_at). Completing the last remaining lesson moves In progress → Completed (sets completed_at). A one-lesson course goes through both moves in one request. Every new completion sets last_activity_at.
+  - Locking: take the enrolment row FOR UPDATE, and the course row FOR SHARE, so completions on the same course don't block each other but do wait for archiving or a lesson removal (which take FOR UPDATE).
+- GET /me/courses: the learner's enrolled courses with course status (archived ones marked), progress state, lessons done and total, and the times.
+- GET /courses/{id}: for a learner, lesson content only when enrolled; an enrolled learner also gets their own progress and completed lesson ids. Enrolled learners can open an archived course.
+- GET /courses/{id}/progress: instructors only (learners 403, role first). Every enrolled learner with name, email, state, lessons done and total, and the times. Step 8's CSV will reuse this.
+- Deleting a completed lesson: 409 with a clear message.
+- Learners never see another learner's progress.
+
+## Tests (beyond the obvious)
+- Every progress move, including the one-lesson course; completing twice changes nothing; adding a lesson after completion leaves Completed.
+- Enrol: published only; draft, archived and missing courses give identical 404s; twice → 409; instructors 403.
+- The CHECKs: the database refuses a completed enrolment without completed_at, and a not_started one with started_at.
+- Concurrency by constraint: two completions of the same lesson leave one row; two enrolments leave one row.
+- Visibility: lesson content hidden before enrolling; enrolled learners can open an archived course, but completing there gives 409; not-enrolled learners get 404 for it.
+- Comments and feed: enrolled learner allowed, visible-but-not-enrolled learner 403, invisible course 404.
+- Deleting a completed lesson gives 409 and changes nothing; deleting an uncompleted one still works.
+- A learner can't read another learner's progress anywhere.
+- As before, show that the key tests can fail when the rule they guard is removed.
+
+## Order: three changes, one commit each
+1. Migration 0004, the models, POST /enroll and GET /me/courses.
+2. Completing lessons: the progress moves, the locking, and the rule on deleting completed lessons.
+3. Visibility: lesson content before enrolment, archived access for enrolled learners, enrolment for comments and the feed, and GET /courses/{id}/progress.
+Then, as a fourth step with no code: draft decisions 14 onwards for docs/decisions.md from my nine decisions above, in the same format (titled, Chose / Rejected / Why), and a line for Decision 12 saying completed lessons can no longer be deleted. Show me the draft before saving.
+
+Not in this step: bulk enrolment, the course list and search, the CSV, the frontend.
+
+Check by hand: in your report for change 2, give me exact PowerShell commands to sign in as a learner, enrol in course 1, complete its lessons one by one, and see the state go Not started → In progress → Completed.
+
+Start here: show the plan and file list for all three changes, and anything in my decisions you think is wrong or unclear, then wait for my go.
+```
+
+</details>
+
+### What I got
+
+A plan for the three changes, and five points it thought were wrong or unclear in my decisions.
+
+### What the AI caught
+
+- **A learner could get stuck at In progress.** If a course has lessons A, B and C, a learner has done A and B, and the instructor removes C (which nobody completed), the learner has finished everything but stays In progress forever, and after 14 days would show as an inactivity alert. I chose its fix: a removal moves such learners to Completed in the same transaction (Decision 16).
+- **Enrolling could slip past an archive.** A learner enrolling at the same moment an instructor archives the course would end up enrolled in an archived course. Enrolment now takes the course row FOR SHARE, so the two wait for each other (Decision 18).
+- **One more database check:** `last_activity_at` is set exactly when `started_at` is, which the inactivity alerts will rely on.
+- Decisions 8 and 13 needed follow-up lines too, not only Decision 12.
+
+## 10. Step 4: answers and reviews
+
+### Prompts
+
+My answers to its five points:
+
+<details>
+<summary>Answers</summary>
+
+```text
+My answers:
+1. (a). When a lesson is removed, move every In-progress learner who has now finished all the remaining lessons to Completed, in the same transaction. completed_at is the removal time; leave last_activity_at unchanged, since the learner didn't do anything. Test it, including a learner who still has lessons left staying In progress.
+2. Yes: enrolment takes the course row FOR SHARE, with a lock test.
+3. Yes: enrolled learners can comment on and read the feed of an archived course.
+4. (a): instructors get 403 on GET /me/courses, role checked first.
+5. Yes: add the CHECK that last_activity_at is set exactly when started_at is.
+Docs: yes, follow-up lines for Decisions 8, 12 and 13.
+Your defaults are fine. Go: start on change 1.
+```
+
+</details>
+
+After change 1, from my review of its report:
+
+<details>
+<summary>After change 1</summary>
+
+```text
+Committed.
+Yes, add an index on lesson_completions.lesson_id in change 2's migration.
+
+Two things for the next changes:
+1. Change 2: until change 3 lets enrolled learners open archived courses, no learner can see an archived course, so completing a lesson there gives 404, not 409. Don't reorder the checks to make the 409 test pass, because that would tell learners who aren't enrolled that the course exists. Either move that test to change 3, or bring the visibility change into change 2.
+2. Change 3: your default says a learner already enrolled in a course that is later archived gets 409 "already enrolled" if they enrol again. Today they get 404, and none of the planned tests checks it, so add one.
+
+Start the change 2.
+```
+
+</details>
+
+After change 2, once my own hand check had passed:
+
+<details>
+<summary>After change 2</summary>
+
+```text
+Committed.
+The hand check printed Not started -> In progress -> Completed.
+For the step 4 decisions draft later: note that finishing learners after a lesson removal runs two queries per In-progress learner, which is fine at this size.
+Start change 3.
+```
+
+</details>
+
+On the decision drafts:
+
+<details>
+<summary>On the decision drafts</summary>
+
+```text
+Good draft.
+Three additions, then save:
+1. Add an "Updated in step 4" line to Decision 7: enrolment and lesson completion take the course row FOR SHARE, then the enrolment row FOR UPDATE, the same course-first order as every other change, so completions don't block each other, they wait for an archive or a lesson removal, and no two requests can deadlock.
+2. Decision 14, add to Why: the database also refuses an enrolment whose status and times disagree (CHECKs on completed_at, started_at and last_activity_at), so even a bug in the service can't store an impossible state.
+3. Decision 22, Why: start with the brief. Goal 9 lists what the log records (creation, edits, publish and archive transitions, comments), and enrolments and completions aren't on that list. Keep the rest.
+Skip the instructor 403 on My courses. Then save to docs/decisions.md.
+```
+
+</details>
+
+### What I got
+
+Three commits (enrolment and My courses; completing lessons; visibility and the progress list), each with its tests and a mutation check per rule, then Decisions 14 to 22.
+
+### What I corrected
+
+- In the plan, the test for "completing a lesson in an archived course gives 409" sat in change 2, but until change 3 a learner couldn't see an archived course at all, so that test could only pass by reordering the checks, which would tell learners who aren't enrolled that the course exists. The agent moved the test to change 3, with the visibility change that makes it reachable.
+- The plan promised that re-enrolling in a course that was archived since gives 409, not 404, but no planned test checked it. I asked for one.
+
+### Where the AI corrected me
+
+My line for Decision 7 said enrolling locks the enrolment row too. It doesn't: it creates the row, so it only needs the shared course lock. The agent also narrowed my "no two requests can deadlock" to the claim the lock order actually guarantees. I kept both corrections.
+
+## 11. Deploying the API (step 6a)
+
+### Prompts
+
+I asked for a readiness review and a plan before I created the Neon and Render accounts:
+
+<details>
+<summary>Readiness review and plan</summary>
+
+```text
+Step 6a: deploy the backend only. No frontend yet.
+
+Goal: the API runs on Render's free tier, against a Postgres database on Neon's free tier, and passes a smoke test from my machine. I create the accounts and paste values into the dashboards myself; you get the code ready and tell me exactly what to do.
+
+Facts to design around:
+- Render free tier: no shell and no pre-deploy command, so migrations must run in the start command. The service sleeps after 15 minutes idle and takes about a minute to wake.
+- Neon free tier: its compute also suspends when idle, so the first connection after a pause can fail or be slow.
+- Settings come only from environment variables (app/core/config.py): DATABASE_URL, JWT_SECRET, JWT_EXPIRE_MINUTES, CORS_ORIGINS, SEED_PASSWORD. Neon's connection string must start with postgresql+psycopg:// for our driver.
+- Python must be 3.12 on Render as well.
+- I can't run the seed on Render, so I'll run python -m app.seed from my machine with DATABASE_URL pointing at Neon.
+
+What I want from you:
+1. A readiness review of the backend for this deploy. Check:
+   - how Render will know to use Python 3.12;
+   - the build and start commands, with the start command running alembic upgrade head before uvicorn and binding to 0.0.0.0:$PORT;
+   - whether to use Neon's pooled or direct connection string, and why;
+   - whether the engine needs pool_pre_ping or similar so a suspended Neon compute or a sleeping Render instance doesn't produce a 500 on the first request;
+   - CORS for now (no frontend yet);
+   - that /health doesn't touch the database, or whether it should.
+2. A plan and file list before any code. Keep code changes minimal, and tell me which existing tests cover them.
+3. After my go: the code changes, with tests passing (python -m pytest).
+4. A step-by-step deploy guide I can follow:
+   - Neon: create the project and database, and which connection string to copy;
+   - running the migrations and seed from my machine against Neon first, so I see any failure locally;
+   - Render: every field of the new Web Service form (root directory backend), every environment variable, and how to generate JWT_SECRET;
+   - what usually breaks on a first deploy, and where I'd see it in Render's logs.
+5. A PowerShell smoke test against the live URL:
+   - /health;
+   - an instructor login, then creating, adding a lesson to and publishing a course;
+   - a learner login, then enrolling, completing a lesson and reading My courses;
+   - a learner calling an instructor route gets 403.
+   Show the output I should expect.
+6. A short docs/deploy.md with the services, the environment variable names (no values), the commands, and the cold-start note.
+
+Never put a real secret in any file. Don't run git commit or git push; I commit myself. Start with the readiness review and the plan, then wait for my go.
+```
+
+</details>
+
+While it was planning, I deployed by hand, so I told it what I'd done and changed its plan:
+
+<details>
+<summary>Go, with changes</summary>
+
+```text
+Go, with changes. I deployed by hand while you were planning, and it's live at https://course-delivery-api.onrender.com (/health returns ok).
+What I set: root directory backend; build "pip install -r requirements.txt"; start "python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"; health check /health; env vars PYTHON_VERSION=3.12.7, DATABASE_URL (Neon Singapore, Postgres 17, database course_delivery, direct connection), JWT_SECRET. CORS_ORIGINS not set. Render region Singapore.
+I seeded Neon from my machine: 7 demo accounts, no courses.
+First-deploy problems, in order: no root directory (requirements.txt not found); Python 3.14 used by default; env vars not saved (DATABASE_URL not set). I also pasted the Neon connection string into a chat by mistake, so I reset the Neon password and updated Render.
+
+Changes to your plan:
+- Skip backend/.python-version. PYTHON_VERSION=3.12.7 already works, and one source of truth is safer.
+- Keep backend/tests/test_health.py.
+- The guide is no longer needed. Put what matters in docs/deploy.md instead: services, env var names only, commands, local migrate/seed against Neon, cold starts, the three first-deploy problems, and how to reset Neon before the final demo seed.
+- Smoke test: as you planned, archiving its course at the end. Ask for the demo password with Read-Host, never from a file. Show the expected output.
+- Draft a decision, in the titled format, for the deploy choices: migrations in the start command (no pre-deploy step on the free tier), the direct Neon connection, and the database-free /health. Show me before saving.
+Don't run git commit or push.
+```
+
+</details>
+
+### What I got
+
+A readiness review. `pool_pre_ping` was already on, so no code change was needed; it recommended Neon's direct connection for migrations, and a `/health` that never touches the database. Then `docs/deploy.md`, a test that `/health` sends no SQL, Decision 23, and a PowerShell smoke test.
+
+### What went wrong, and what I did
+
+- **Three failed deploys.** The first had no root directory (`requirements.txt` not found), the second ran on Python 3.14, Render's default, and the third had no environment variables saved. I fixed each from Render's log.
+- **I pasted the Neon connection string, with its password, into a chat** while seeding the database. I reset the password in Neon at once and updated Render, so the leaked one no longer works. Since then the seed instructions read the connection string from a hidden prompt.
+
+### What the AI caught
+
+The activity log is append-only, so anything the smoke test creates on the live database can never be deleted. The smoke test archives its course at the end, and `deploy.md` explains how to reset Neon before the final demo seed.
+
+## 12. Step 5: course search
+
+### Prompts
+
+<details>
+<summary>The search step</summary>
+
+```text
+Step 5: the course list with search, filters, sorting and pages (goal 6). Backend only.
+
+The brief's exact rule:
+"One list shows every course the viewer can see — published courses for learners, every course including drafts and archives for instructors — with a text search over titles and descriptions, filters for category, status and instructor, sorting by title, creation date or enrollment count, and pagination showing the total number of matches. All of this must happen on the server — do not load every course into the browser and filter there."
+
+What I want: GET /courses with q, category, status, instructor_id, sort (title, created_at, enrollment_count), order (asc/desc), page, page_size. The response is items, total, page, page_size. Each item carries what a list row needs, including the enrolment count and the instructor's name.
+
+Rules I already know:
+- Learners see published courses only, enforced in the SQL, not after the query. That includes archived courses they're enrolled in: those live in My courses (Decision 17), not the catalogue.
+- Every filter, the sort and the page happen in one database query (plus at most one for the total). A test proves the query count doesn't grow with the number of courses.
+- Every sort has a tie-breaker (id), so pages never repeat or skip a course.
+- Bad parameters (unknown sort, page 0, page_size above the maximum, unknown category or status) give 422.
+- The search treats % and _ in the user's text as plain characters.
+
+Before any code, give me options and trade-offs, and wait for my choices, on:
+1. Search: ILIKE versus Postgres full-text search, and whether either needs an index at this size.
+2. Enrolment count: counted on read (join or subquery) versus a stored counter on courses.
+3. The total: a separate COUNT query versus a window function.
+4. What a learner's status filter does: ignored, 422, or allowed only for "published".
+5. Default sort and page size, and the maximum page size.
+6. Anything in the rule above you think is wrong or unclear.
+
+Then the plan and file list. Tests: every filter alone and combined, each sort in both directions with ties, page boundaries and total, learners never seeing a draft or archived course through any parameter, the 422s, the % and _ search, and the query count. Run the mutation checks as before. Show me the SQL generated for one call using every parameter, and tell me what slows down first at 100x the data.
+
+Don't run git commit or push. Start with the options, then wait.
+```
+
+</details>
+
+My choices from its options:
+
+<details>
+<summary>Choices</summary>
+
+```text
+1a, 2a, 3a, 4d, 5 your defaults, 6 yes to lower(title) then id, the join, and all your edge-case defaults.
+One addition: each list item gets "enrolled": true/false for the viewer (an EXISTS subquery inside the page query, so still one query plus the count; always false for instructors). Add a test that it's true only for the viewer's own enrolments.
+After the code, draft decisions for: ILIKE over full-text search, counting enrolments on read (including the deadlock a stored counter would cause with Decision 7's shared lock), and sorting by lower(title) because of collation. Show me the draft before saving.
+Go.
+```
+
+</details>
+
+After its report:
+
+<details>
+<summary>The title sort</summary>
+
+```text
+One change before saving: sort titles by lower(title) COLLATE "C", then id. lower() removes case, but the comparison still uses the database's collation, so spaces and punctuation could still order differently between Alpine and Neon. COLLATE "C" makes the order the same everywhere. Add one test with titles that differ only in a space or punctuation, so the order is pinned. Then fix Decision 26's Why to say this, and keep "My local Postgres (Alpine)" with its example.
+Decisions 24 and 25 are right as written. Save all three after the change, and rerun the suite and the tie-breaker mutation.
+```
+
+</details>
+
+### What I got
+
+`GET /courses` with search, filters, sort and pages in one query plus one count, and 25 tests, each rule shown to fail when removed.
+
+### What the AI caught
+
+- **A stored enrolment counter would deadlock.** Enrolling holds the course row FOR SHARE (Decision 7), and updating a counter on that row needs a stronger lock, so two learners enrolling at once would each wait for the other. That's a better reason than effort to count on read (Decision 25).
+- **Title order depends on the database's collation.** My local Alpine Postgres sorted `Apple, Zebra, apple, banana`.
+- Its first query loaded every instructor's whole user row, password hash included, just to show a name. It changed the query to select only the name.
+- It strengthened the query-count test before trusting it: with one shared instructor, loading instructors one by one would only have cost one extra query.
+
+### What I corrected
+
+The agent sorted titles by `lower(title)`. That removes case, but the comparison still uses the collation, so spaces and punctuation could still order differently on Neon. I asked for `lower(title) COLLATE "C"` (Decision 26).
+
+### Where the AI corrected me
+
+The test I asked for could never fail on my machine, because Alpine already sorts by bytes. The agent made the test also check that the SQL asks for `COLLATE "C"`, and showed it failing without it.
+
+### My own mistake
+
+I committed the follow-up change with my prompt to the agent as its commit message, and renamed it with `git commit --amend` and a force push.
+
+## 13. Step 6b: the learner frontend on Vercel
+
+### Prompts
+
+<details>
+<summary>The frontend step</summary>
+
+```text
+Step 6b: the first frontend, for learners, deployed to Vercel. The backend is live at https://course-delivery-api.onrender.com and its API is fixed: don't change backend code except CORS settings if needed.
+
+Stack: React + Vite + Tailwind v4 + React Router v7, plain fetch, no component library, no state library, no TypeScript. Code lives in frontend/ with src/{api,pages,components}. All API calls go through src/api/ and read the base URL from VITE_API_URL. I'm on Windows with Application Control; check what Node and npm versions I have before anything else.
+
+Pages for this step:
+1. Login (email + password). Show the server's error message on failure. Show demo logins only as a hint text, no passwords in the code.
+2. Course list (GET /courses): search box, category and sort controls, page controls with the total. Filters and the page live in the URL (useSearchParams), so a reload or a shared link keeps them. Debounce the search. Each row shows title, category, instructor, enrolment count, and "Enrolled" or an "Enrol" button (from the enrolled flag).
+3. Course page (GET /courses/{id}): lessons in order. Before enrolling: titles only and an Enrol button. After enrolling: lesson content, "Mark complete" per lesson (done ones marked), and my progress (state, X of Y). An archived course I'm enrolled in shows read-only, with a note, and no Mark complete buttons.
+4. My courses (GET /me/courses): each course with state and X of Y, archived ones labelled.
+5. A nav bar with the user's name, role and Log out. Instructors can log in and browse the list; their own pages come next step, so show a short "instructor tools coming" note rather than hiding the gap.
+
+Behaviour every page needs:
+- Loading, empty and error states. Show the server's "detail" message on 4xx.
+- A 401 anywhere logs the user out and returns to login.
+- Render's free tier sleeps: if a request takes over ~3 seconds, show "Waking the server, this can take up to a minute".
+- Buttons disable while their request runs, so double clicks don't send twice.
+- The UI never decides permissions; it only reflects what the API returns.
+
+Before any code, give me options and trade-offs, and wait for my choice, on:
+1. Where the JWT lives: localStorage, sessionStorage, or memory only (and what each costs on reload and against XSS).
+2. How to know the current user and role after login (decode the token, call GET /auth/me, or store the login response).
+3. How Vercel serves client-side routes on reload (rewrites in vercel.json), and the exact CORS_ORIGINS value I set on Render.
+4. Anything in this list you think is wrong, missing, or too much for one step.
+
+Then the plan and file list. For checking: no frontend unit tests this step; instead give me a manual test checklist covering every page and state above, and tell me exactly how to run it locally against the live API and then on Vercel. Include the Vercel steps: project settings, root directory frontend, VITE_API_URL, and how to redeploy.
+
+Don't run git commit or push. Start with the Node check and the options, then wait.
+```
+
+</details>
+
+My choices from its options:
+
+<details>
+<summary>Choices</summary>
+
+```text
+1a, 2b, 3 as you described, 4 yes to four commits, hide Enrol for instructors (a), and all your additions.
+Two more:
+- Lesson content renders as plain text with line breaks kept (whitespace-pre-wrap), never as HTML.
+- After each of the four commits' code, stop and give me its Summary, Description and file list, and wait for "committed" before starting the next.
+At the end, draft decisions for: getting the user from /auth/me rather than the token, plain-text lesson content as the XSS defence for the localStorage token (Decision 1), and hiding instructor-only buttons as presentation while the server still decides. Show me before saving.
+I've set CORS_ORIGINS=http://localhost:5173 on Render.
+Go.
+```
+
+</details>
+
+After commit 2's report:
+
+<details>
+<summary>The missing filters</summary>
+
+```text
+Not committed yet. One gap, and it's my mistake: goal 6 says "filters for category, status and instructor", and my spec only asked for category. Add both before commit 2:
+- Status filter (All / Draft / Published / Archived), shown to instructors only. Learners only see published courses anyway, so for them it would do nothing.
+- Instructor filter, for everyone. There's no endpoint listing instructors, so first add a small backend one as its own commit: GET /instructors, any signed-in user, returning id and full_name only (no emails), sorted by name. The names are already shown on course rows, so it reveals nothing new. Tests: both roles get it, no email in the response, 401 without a token.
+Both filters live in the URL like the others, and changing either goes back to page 1. Add both to the browser checks, with a mutation check for each.
+Order: the backend commit first (stop and give me its Summary, Description and files), then the updated commit 2.
+Keep the .badge style in index.css. Add GET /instructors to the decisions you draft at the end of this step.
+```
+
+</details>
+
+After commit 3, once I'd checked it by hand:
+
+<details>
+<summary>Commit 4 and the undo question</summary>
+
+```text
+Committed and pushed. Checked by hand: My courses, Mark complete through to Completed, the archived course, and the not-enrolled view all work. Start commit 4.
+
+For the decisions draft at the end of this step, add one: completing a lesson is final, with no undo and no "mark incomplete". Goal 4 says any other move is rejected by the server; undoing would rewrite the completions the dashboard counts and break the inactivity alerts; and learners can already re-read any completed lesson, since content stays visible after completion.
+
+As a possible future improvement (don't build it now), mention a personal "Revisit later" checklist: a checkbox per lesson, like a Markdown task list, that the learner can tick and untick freely. It is private to the learner, separate from Mark complete, and never changes progress, so it breaks no rule. It would need to look clearly different from the official "Done" badge, so nobody thinks Mark complete can be unticked.
+```
+
+</details>
+
+### What I got
+
+Before planning, the agent built a throwaway app with the exact versions it meant to pin, to prove Application Control on my machine wouldn't block the frontend tools. Then four commits (sign-in, the course list, the course page and My courses, the Vercel setup), checked in a real browser for both roles, with each key rule shown to fail when broken, and Decisions 27 to 31. It's live at https://course-delivery-app.vercel.app.
+
+### What I corrected
+
+- **My spec missed two filters.** Goal 6 asks for filters on category, status and instructor; I had only asked for category. The agent flagged it in its report. The instructor filter needed a list of instructors, so `GET /instructors` went in as its own backend commit (Decision 30).
+- **I asked for an undo on "Mark complete".** Thinking it through, goal 4 rejects any backward move, undoing would rewrite the completions the dashboard counts, and learners can already re-read a completed lesson. I recorded it as Decision 31 instead, with a private "Revisit later" checklist as a possible future improvement.
+
+### What the AI caught
+
+- Its line-break check passed for the wrong reason: it found the lesson text by the very class being tested. It fixed the check and showed it failing when line breaks were dropped. That's the third time an agent test was strengthened before being trusted.
+- On the CORS setting, it recommended allowing exact origins only, so Vercel's preview deployments can't call the API (the update to Decision 23).
+
+### My own mistakes
+
+- One commit took the course-list files along with the `GET /instructors` change, because GitHub Desktop ticks every changed file. I undid it with `git reset HEAD~1` and redid it as two commits.
+- The agent stopped my own dev server once while freeing its ports. It now stops only the processes on its own ports.
+
+## 14. Writing schema.md
+
+### Prompt
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+Docs only, no code changes: fill in docs/schema.md. It's still the template; answer each of its five questions in plain words, in my voice, accurate to the migrations 0001-0005 and the models as they are now:
+1. Table by table: columns and types (users, courses, lessons, activity_log, enrollments, lesson_completions).
+2. Relationships: one-to-many (course -> lessons, course -> activity_log, enrollment -> lesson_completions) and many-to-many (users <-> courses through enrollments).
+3. Which rules the database enforces (unique constraints, CHECKs, RESTRICT foreign key, the append-only trigger, the action CHECK) and which the services enforce (roles, state moves, visibility), and why the line is drawn there. Point to the decision numbers.
+4. What is deliberately denormalised, if anything (say so honestly if nothing is; enrolment counts are computed on read, Decision 25).
+5. What breaks first at 100x: the enrolment-count sort, the ILIKE scans, deep OFFSET pages, and the fix for each.
+Keep it short and readable, with one small table per database table. Leave a line saying the alert dismissals table arrives with goal 10. Show me the draft before saving.
+```
+
+</details>
+
+### What I got
+
+A draft of all five answers. I had it checked line by line against the five migrations before saving: every column, type, constraint and index matched. For question 4 it didn't write "nothing denormalised"; it named the log copying titles and old values, and the enrolment's start and last-activity times, and explained why neither can drift.
