@@ -1,13 +1,26 @@
-import { Link, NavLink } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useAuth } from "./AuthProvider";
 
-function linkClass({ isActive }) {
+function linkClass(active) {
   const base = "inline-flex min-h-11 items-center text-sm";
-  return isActive ? `${base} font-semibold text-accent` : `${base} text-muted hover:text-ink`;
+  return active ? `${base} font-semibold text-accent` : `${base} text-muted hover:text-ink`;
+}
+
+// A nav link that marks itself as the current page, for sight and for screen readers (aria-current).
+function NavItem({ to, active, children }) {
+  return (
+    <Link to={to} aria-current={active ? "page" : undefined} className={linkClass(active)}>
+      {children}
+    </Link>
+  );
 }
 
 export default function NavBar() {
   const { user, logout } = useAuth();
+  const { pathname, search } = useLocation();
+  // "Courses I created" is the course list filtered to this instructor, so both list links lead to "/".
+  const onList = pathname === "/";
+  const showingMine = onList && new URLSearchParams(search).get("instructor_id") === String(user.id);
 
   return (
     <header className="border-b border-line bg-surface">
@@ -15,14 +28,19 @@ export default function NavBar() {
         <Link to="/" className="inline-flex min-h-11 items-center font-semibold">
           Course Delivery
         </Link>
-        <NavLink to="/" end className={linkClass}>
+        <NavItem to="/" active={onList && !showingMine}>
           Courses
-        </NavLink>
-        {/* Only learners have enrolments. Hiding the link is presentation: the API still decides. */}
+        </NavItem>
+        {/* Each role's own links are presentation only: the API still decides what each person can do. */}
+        {user.role === "instructor" && (
+          <NavItem to={`/?instructor_id=${user.id}`} active={showingMine}>
+            Courses I created
+          </NavItem>
+        )}
         {user.role === "learner" && (
-          <NavLink to="/my-courses" className={linkClass}>
+          <NavItem to="/my-courses" active={pathname === "/my-courses"}>
             My courses
-          </NavLink>
+          </NavItem>
         )}
         <div className="ml-auto flex items-center gap-4">
           <span className="text-sm">
@@ -33,11 +51,6 @@ export default function NavBar() {
           </button>
         </div>
       </nav>
-      {user.role === "instructor" && (
-        <p className="border-t border-line px-4 py-2 text-center text-sm text-muted">
-          Instructor tools are coming soon. For now you can browse the catalogue.
-        </p>
-      )}
     </header>
   );
 }

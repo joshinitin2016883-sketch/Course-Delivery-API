@@ -91,6 +91,10 @@ export async function apiRequest(path, { method = "GET", body, signOutOn401 = tr
     throw new ApiError(response.status, await readErrorMessage(response));
   }
 
+  // 204 No Content (removing a lesson) has no body to read.
+  if (response.status === 204) {
+    return null;
+  }
   return response.json();
 }
 

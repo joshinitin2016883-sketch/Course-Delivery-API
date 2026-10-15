@@ -56,14 +56,15 @@
   }
 }
 
-/* Shared styles for <button> elements and text inputs. All are at least 44px tall, so easy to tap. */
+/* Shared styles for buttons (and links that look like buttons) and text inputs. All are at least 44px tall,
+   so easy to tap. not-disabled:hover keeps a disabled button from reacting, and still works on links. */
 @layer components {
   .btn-primary {
-    @apply inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent transition-colors enabled:hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent transition-colors not-disabled:hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .btn-secondary {
-    @apply inline-flex min-h-11 items-center justify-center rounded-lg border border-line bg-surface px-4 text-sm font-medium text-ink transition-colors enabled:hover:bg-page disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-11 items-center justify-center rounded-lg border border-line bg-surface px-4 text-sm font-medium text-ink transition-colors not-disabled:hover:bg-page disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .input {

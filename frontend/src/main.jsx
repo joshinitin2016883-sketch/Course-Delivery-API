@@ -8,6 +8,7 @@ import CourseListPage from "./pages/CourseListPage";
 import CoursePage from "./pages/CoursePage";
 import LoginPage from "./pages/LoginPage";
 import MyCoursesPage from "./pages/MyCoursesPage";
+import NewCoursePage from "./pages/NewCoursePage";
 import NotFoundPage from "./pages/NotFoundPage";
 import "./index.css";
 
@@ -22,6 +23,8 @@ createRoot(document.getElementById("root")).render(
           {/* Every other page needs a signed-in user. */}
           <Route element={<RequireAuth />}>
             <Route path="/" element={<CourseListPage />} />
+            {/* A fixed path wins over /courses/:courseId, so "new" is never read as a course id. */}
+            <Route path="/courses/new" element={<NewCoursePage />} />
             <Route path="/courses/:courseId" element={<CoursePage />} />
             <Route path="/my-courses" element={<MyCoursesPage />} />
             <Route path="*" element={<NotFoundPage />} />

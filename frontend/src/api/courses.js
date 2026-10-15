@@ -1,5 +1,12 @@
 import { apiRequest } from "./client";
 
+// The same three categories as the API (backend/app/models/course.py), for the filter and the forms.
+export const CATEGORIES = [
+  { value: "onboarding", label: "Onboarding" },
+  { value: "compliance", label: "Compliance" },
+  { value: "skills", label: "Skills" },
+];
+
 // One page of the course list. Searching, filtering, sorting and paging all happen on the server.
 export function listCourses({ q, category, status, instructorId, sort, order, page }) {
   const params = new URLSearchParams({ sort, order, page });
@@ -16,6 +23,11 @@ export function listCourses({ q, category, status, instructorId, sort, order, pa
 // The names the instructor filter offers: id and full name for every instructor.
 export function listInstructors() {
   return apiRequest("/instructors");
+}
+
+// Every new course starts as a draft; the server ignores anything else sent with it.
+export function createCourse({ title, description, category }) {
+  return apiRequest("/courses", { method: "POST", body: { title, description, category } });
 }
 
 export function enroll(courseId) {

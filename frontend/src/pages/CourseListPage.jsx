@@ -1,17 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { enroll, listCourses, listInstructors } from "../api/courses";
+import { CATEGORIES, enroll, listCourses, listInstructors } from "../api/courses";
 import { useAuth } from "../components/AuthProvider";
 import Pagination from "../components/Pagination";
 import { Empty, ErrorMessage, Loading } from "../components/States";
 import { CourseStatusBadge } from "../components/Status";
-
-// The same three categories as the API (backend/app/models/course.py).
-const CATEGORIES = [
-  { value: "onboarding", label: "Onboarding" },
-  { value: "compliance", label: "Compliance" },
-  { value: "skills", label: "Skills" },
-];
 
 // The three course states, for the instructors' status filter.
 const STATUSES = [
@@ -168,7 +161,18 @@ export default function CourseListPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Courses</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* "Courses I created" in the nav is this list filtered to the instructor's own id. */}
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {user.role === "instructor" && instructorId === String(user.id) ? "Courses I created" : "Courses"}
+        </h1>
+        {/* Only instructors create courses. Hiding the button is presentation: the server refuses anyone else. */}
+        {user.role === "instructor" && (
+          <Link to="/courses/new" className="btn-primary">
+            New course
+          </Link>
+        )}
+      </div>
 
       <div className="space-y-4">
         <div>
