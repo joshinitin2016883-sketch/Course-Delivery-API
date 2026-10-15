@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { completeLesson, enroll, getCourse } from "../api/courses";
 import { useAuth } from "../components/AuthProvider";
+import LessonManager from "../components/LessonManager";
 import ManageCourse from "../components/ManageCourse";
 import { Empty, ErrorMessage, Loading } from "../components/States";
 import { CourseStatusBadge, ProgressSummary } from "../components/Status";
@@ -51,6 +52,12 @@ export default function CoursePage() {
   // A completion was saved: the server answered with your new progress.
   function updateProgress(progress) {
     setCourse((current) => ({ ...current, my_progress: progress }));
+  }
+
+  // After an instructor changes the lessons, ask the server for the course again, so the page shows the
+  // lessons exactly as saved (removing one renumbers the others).
+  async function reloadCourse() {
+    setCourse(await getCourse(course.id));
   }
 
   if (error) {
@@ -117,7 +124,16 @@ export default function CoursePage() {
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Lessons</h2>
-        {course.lessons.length === 0 ? (
+        {/* Instructors edit the lessons, except on an archived course, which is read-only. Presentation
+            only: the server refuses lesson changes from learners and on archived courses. The key changes
+            whenever the saved lessons do, so the manager starts afresh from them. */}
+        {user.role === "instructor" && !archived ? (
+          <LessonManager
+            key={course.lessons.map((lesson) => `${lesson.id}:${lesson.position}`).join(",")}
+            course={course}
+            onChanged={reloadCourse}
+          />
+        ) : course.lessons.length === 0 ? (
           <Empty title="This course has no lessons yet." />
         ) : (
           <ol className="space-y-4">

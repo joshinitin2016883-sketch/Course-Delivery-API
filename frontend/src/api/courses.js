@@ -41,6 +41,25 @@ export function changeStatus(courseId, move) {
   return apiRequest(`/courses/${courseId}/${move}`, { method: "POST" });
 }
 
+// A new lesson goes at the end of the course.
+export function addLesson(courseId, { title, content }) {
+  return apiRequest(`/courses/${courseId}/lessons`, { method: "POST", body: { title, content } });
+}
+
+export function editLesson(courseId, lessonId, { title, content }) {
+  return apiRequest(`/courses/${courseId}/lessons/${lessonId}`, { method: "PUT", body: { title, content } });
+}
+
+// lessonIds is every lesson of the course, in the new order: one request and one log entry per reorder.
+export function reorderLessons(courseId, lessonIds) {
+  return apiRequest(`/courses/${courseId}/lessons/order`, { method: "PUT", body: { lesson_ids: lessonIds } });
+}
+
+// The server answers 204 (no body), which apiRequest returns as null.
+export function removeLesson(courseId, lessonId) {
+  return apiRequest(`/courses/${courseId}/lessons/${lessonId}`, { method: "DELETE" });
+}
+
 export function enroll(courseId) {
   return apiRequest(`/courses/${courseId}/enroll`, { method: "POST" });
 }
